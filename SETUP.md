@@ -14,23 +14,17 @@ One-time steps to get the tracker live. About 30 minutes. The app is useless unt
 
 **SQL Editor → New query**, paste the whole of `supabase/migrations/0001_init.sql`, **Run**. It creates the tables, row-level security, the one-running-timer indexes, and adds `entries` to the realtime publication.
 
-## 3. Auth: email codes, no open signup
+## 3. Auth: two accounts with passwords, no open signup
 
-The app signs in with a 6-digit code emailed to you. Codes work inside an installed PWA; magic links open in Safari instead and lose the session, so we avoid them.
+The app signs in with email and password. Each phone signs in once and stays signed in, so you'll type the password about twice in the life of the app. No email is ever sent, which matters: Supabase's free built-in mailer only delivers to members of your Supabase organization, and on new free projects the email templates can't be customised without wiring up your own SMTP provider. Passwords sidestep all of it.
 
-1. **Authentication → Providers → Email**: keep it enabled. Turn **off** "Confirm email" (you'll create the users yourself).
-2. **Authentication → Sign In / Providers → "Allow new users to sign up"**: turn **off**. Nobody but the two of you should have an account.
-3. **Authentication → Email Templates → Magic Link**: replace the body with something like:
-   ```html
-   <h2>Your sign-in code</h2>
-   <p style="font-size:32px;letter-spacing:4px"><strong>{{ .Token }}</strong></p>
-   <p>Enter this in the Rosalie app. It expires in an hour.</p>
-   ```
-   `{{ .Token }}` is what turns the magic-link email into a code email.
-4. **Authentication → Users → Add user → Create new user** twice: your email and Dominique's, with **Auto Confirm User** on. Passwords are irrelevant; pick anything.
-5. **Authentication → URL Configuration → Site URL**: `https://lanebabytracker.netlify.app`.
+In the sidebar click **Authentication**.
 
-Heads-up: Supabase's built-in mailer is rate-limited to a handful of emails per hour. You sign in once per device and stay signed in, so this is fine in practice. If it ever bites, wire a custom SMTP under **Project Settings → Auth → SMTP** (Resend's free tier works).
+1. **Sign In / Providers → Email**: leave it enabled. Turn **off** "Allow new users to sign up" so nobody but the two of you can make an account.
+2. **Users → Add user → Create new user**: enter your email, a password, and tick **Auto Confirm User**. Repeat for Dominique. Pick passwords you can type on a phone; a password manager entry each is sensible.
+3. **URL Configuration → Site URL**: `https://lanebabytracker.netlify.app`.
+
+Forgotten password later: **Authentication → Users → ⋯ → Send password recovery** needs email and won't work here; instead use **⋯ → Reset password** (or delete and re-create the user, then re-run the caregiver insert from `seed.sql` for that one row).
 
 ## 4. Household seed
 
@@ -42,7 +36,7 @@ The site `lanebabytracker` already exists and deploys from `main`.
 
 1. **Site configuration → Environment variables** → add `PUBLIC_SUPABASE_URL` and `PUBLIC_SUPABASE_ANON_KEY`.
 2. Build settings are in `netlify.toml` (build `npm run build`, publish `build`, Node 22, SPA redirect). Nothing to set in the UI.
-3. Merge the branch to `main` and let it deploy. Open the URL on your phone, sign in with the code flow.
+3. Merge the branch to `main` and let it deploy. Open the URL on your phone and sign in with the email and password from step 3.
 
 ## 6. Import the Nara history
 
@@ -64,7 +58,7 @@ npm test
 
 ## 7. Install on the phones
 
-Safari → share sheet → **Add to Home Screen**. The icon launches full-screen and keeps its session. Do it on both phones; each signs in once with its own email.
+Safari → share sheet → **Add to Home Screen**. The icon launches full-screen and keeps its session. Do it on both phones; each signs in once with its own email and password.
 
 ## Later
 

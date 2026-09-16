@@ -5,7 +5,7 @@ node_modules
 .env
 .env.*
 !.env.example
-data/
+/data/
 *.log
 .DS_Store
 vite.config.ts.timestamp-*
