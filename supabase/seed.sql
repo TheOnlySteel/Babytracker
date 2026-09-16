@@ -1,5 +1,5 @@
--- Run AFTER 0001_init.sql and AFTER both caregivers have signed in at least once
--- (so their rows exist in auth.users). Edit the two emails, then run in the SQL editor.
+-- Run AFTER 0001_init.sql and AFTER both users exist under Authentication → Users.
+-- Edit the two emails, then run in the SQL editor. Safe to re-run: skips what already exists.
 
 do $$
 declare
@@ -10,13 +10,17 @@ begin
   select id into steel from auth.users where email = 'steel640@hotmail.com';
   select id into dom   from auth.users where email = 'DOMINIQUE_EMAIL_HERE';
   if steel is null or dom is null then
-    raise exception 'Both caregivers must sign in once before seeding (found steel=%, dominique=%)', steel, dom;
+    raise exception 'Create both users under Authentication → Users first (found steel=%, dominique=%)', steel, dom;
   end if;
 
-  insert into households (name) values ('Lane') returning id into hh;
-  insert into children (household_id, name, sex, birth_date) values (hh, 'Rosalie', 'female', '2026-08-09');
-  insert into caregivers (user_id, household_id, display_name) values (steel, hh, 'Steel'), (dom, hh, 'Dominique');
-  insert into household_prefs (household_id, prefs) values (hh, '{"formula_brands": ["Enfamil Neuropro", "Good Start Plus"]}');
+  select id into hh from households limit 1;
+  if hh is null then
+    insert into households (name) values ('Lane') returning id into hh;
+    insert into children (household_id, name, sex, birth_date) values (hh, 'Rosalie', 'female', '2026-08-09');
+    insert into household_prefs (household_id, prefs) values (hh, '{"formula_brands": ["Enfamil Neuropro", "Good Start Plus"]}');
+  end if;
+  insert into caregivers (user_id, household_id, display_name) values (steel, hh, 'Steel'), (dom, hh, 'Dominique')
+  on conflict (user_id) do nothing;
 end $$;
 
 select h.id as household_id, c.id as child_id, c.name, cg.display_name, cg.user_id
