@@ -1,10 +1,11 @@
 <script lang="ts">
   import { untrack } from 'svelte';
   import type { Entry, PumpPayload } from '$lib/data/types';
-  import { store } from '$lib/data/store.svelte';
-  import { closeSheet } from '$lib/data/ui.svelte';
+  import { store, ConflictError } from '$lib/data/store.svelte';
+  import { closeSheet, openSheet } from '$lib/data/ui.svelte';
   import { nonNegative } from '$lib/data/validate';
   import Sheet from '$lib/ui/Sheet.svelte';
+  import ConflictBar from '$lib/ui/ConflictBar.svelte';
   import TimeRow from '$lib/ui/TimeRow.svelte';
   import NoteRow from '$lib/ui/NoteRow.svelte';
 
@@ -21,6 +22,11 @@
   let note = $state(editing?.note ?? '');
   let saving = $state(false);
   let err = $state('');
+  let version = $state(editing?.updated_at);
+  let conflict = $state<Entry | null>(null);
+  const snapshot = () => JSON.stringify([startedAt.getTime(), minutes, left, right, note]);
+  const initial = snapshot();
+  const dirty = $derived(snapshot() !== initial);
 
   async function save() {
     err = '';
@@ -37,18 +43,18 @@
     const ended = new Date(startedAt.getTime() + (m.value ?? 0) * 60000);
     saving = true;
     try {
-      if (editing) await store.update(editing.id, { started_at: startedAt.toISOString(), ended_at: ended.toISOString(), payload, note: note || null }, { undoLabel: 'Updated pump', expectedUpdatedAt: editing.updated_at });
+      if (editing) await store.update(editing.id, { started_at: startedAt.toISOString(), ended_at: ended.toISOString(), payload, note: note || null }, { undoLabel: 'Updated pump', expectedUpdatedAt: version });
       else await store.insert({ type: 'pump', started_at: startedAt, ended_at: ended, payload, note: note || null }, { undoLabel: `Logged ${(l.value ?? 0) + (r.value ?? 0)} mL pump` });
       closeSheet();
-    } catch {
-      /* toast shown; keep the form */
+    } catch (e) {
+      if (e instanceof ConflictError && e.latest) conflict = e.latest;
     } finally {
       saving = false;
     }
   }
   async function del() {
     if (!editing) return;
-    await store.remove(editing.id, 'Pump deleted', editing.updated_at);
+    await store.remove(editing.id, 'Pump deleted', version);
     closeSheet();
   }
   const numVal = (e: Event) => {
@@ -58,7 +64,10 @@
   };
 </script>
 
-<Sheet title="Pump" color="var(--pump)" dark onsave={save} {saving}>
+<Sheet title="Pump" color="var(--pump)" dark onsave={save} {saving} {dirty}>
+  {#if conflict}
+    <ConflictBar latest={conflict} onUseTheirs={() => openSheet('pump', conflict!)} onKeepMine={() => { version = conflict!.updated_at; conflict = null; save(); }} />
+  {/if}
   <TimeRow bind:value={startedAt} />
   <label class="row">
     <span class="row-label">Duration</span>
@@ -78,7 +87,7 @@
 
   {#snippet footer()}
     {#if editing}
-      <button class="btn-ghost danger" onclick={del}>Delete</button>
+      <button class="btn-link danger" onclick={del} disabled={saving}>Delete</button>
     {/if}
   {/snippet}
 </Sheet>
@@ -87,5 +96,4 @@
   .amt { display: inline-flex; align-items: baseline; gap: 6px; }
   .amt input { width: 80px; text-align: right; background: var(--card-2); border: 0; border-radius: 8px; padding: 8px 10px; font-size: 20px; outline: none; }
   .err { margin: 0; padding: 8px 20px; color: var(--danger); font-size: 15px; }
-  .danger { color: var(--danger); border-color: var(--danger); width: 100%; }
 </style>

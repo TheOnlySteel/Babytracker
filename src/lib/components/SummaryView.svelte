@@ -60,7 +60,7 @@
   .seg {
     display: grid; grid-template-columns: 1fr 1fr; margin: 16px 20px; padding: 3px; border-radius: 22px; background: #3a4154;
   }
-  .seg button { min-height: 42px; border-radius: 20px; font-weight: 500; color: var(--text); }
+  .seg button { min-height: 44px; border-radius: 22px; font-weight: 500; color: var(--text); }
   .seg button[aria-selected='true'] { background: #5b6478; font-weight: 600; }
   .srow { display: flex; gap: 20px; padding: 20px; border-top: 1px solid var(--rule); font-size: 19px; line-height: 1.5; }
   .t { display: flex; align-items: center; gap: 10px; margin-bottom: 4px; }

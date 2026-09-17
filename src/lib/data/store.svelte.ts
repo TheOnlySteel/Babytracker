@@ -2,16 +2,19 @@ import type { PostgrestFilterBuilder } from '@supabase/postgrest-js';
 import type { RealtimeChannel, Session } from '@supabase/supabase-js';
 import { supabase } from '$lib/supabase';
 import type { Caregiver, Child, Entry, EntryType, Payload, Prefs } from './types';
-import { toast } from './toast.svelte';
+import { toast, toastError } from './toast.svelte';
 
 const INITIAL_DAYS = 60;
 const PAGE = 1000; // PostgREST's default max-rows; page below it so nothing is silently truncated
 const DAY = 86400_000;
 
 export class ConflictError extends Error {
-  constructor() {
+  /** The row as it is now, so the sheet can show what changed and let the caregiver decide. */
+  latest: Entry | null;
+  constructor(latest: Entry | null) {
     super('Changed on another phone');
     this.name = 'ConflictError';
+    this.latest = latest;
   }
 }
 
@@ -146,7 +149,7 @@ class Store {
     const from = new Date(new Date(to).getTime() - days * DAY).toISOString();
     const { rows, error } = await this.fetchAll(() => sb.from('entries').select('*').is('deleted_at', null).gte('started_at', from).lt('started_at', to));
     if (error) {
-      toast(`Couldn't load older entries: ${error}`);
+      toastError(`Couldn't load older entries: ${error}`);
       return null;
     }
     const ids = new Set(this.entries.map((e) => e.id));
@@ -226,7 +229,7 @@ class Store {
     };
     const { data, error } = await sb.from('entries').insert(row).select().single();
     if (error) {
-      toast(`Couldn't save: ${error.message}`);
+      toastError(`Couldn't save: ${error.message}`);
       throw error;
     }
     const saved = data as Entry;
@@ -254,13 +257,13 @@ class Store {
     if (expected) q = q.eq('updated_at', expected);
     const { data, error } = await q.select();
     if (error) {
-      toast(`Couldn't save: ${error.message}`);
+      toastError(`Couldn't save: ${error.message}`);
       throw error;
     }
     if (!data || data.length === 0) {
-      await this.reloadOne(id);
-      toast('Changed on the other phone. Reopen to see the latest.');
-      throw new ConflictError();
+      // Stale token: fetch what is there now and hand it to the caller; sheets show a conflict panel.
+      const latest = await this.reloadOne(id);
+      throw new ConflictError(latest);
     }
     const after = data[0] as Entry;
     this.upsertLocal(after);
@@ -279,10 +282,11 @@ class Store {
     return after;
   }
 
-  private async reloadOne(id: string) {
+  private async reloadOne(id: string): Promise<Entry | null> {
     const { data } = await supabase().from('entries').select('*').eq('id', id).maybeSingle();
     if (data) this.upsertLocal(data as Entry);
     else this.entries = this.entries.filter((e) => e.id !== id);
+    return (data as Entry | null) ?? null;
   }
 
   /** Soft delete with an undo toast. */
@@ -303,8 +307,32 @@ class Store {
   private async softDelete(id: string, expectedUpdatedAt?: string): Promise<Entry | null> {
     try {
       return await this.update(id, { deleted_at: new Date().toISOString() }, { expectedUpdatedAt });
+    } catch (e) {
+      if (e instanceof ConflictError) toastError('Not deleted: it changed on the other phone. Reopen it first.');
+      return null;
+    }
+  }
+
+  /** Soft-deleted entries from the last `days`, newest deletion first, for the Recently Deleted view. */
+  async fetchDeleted(days = 30): Promise<Entry[] | null> {
+    const sb = supabase();
+    const since = new Date(Date.now() - days * DAY).toISOString();
+    const { data, error } = await sb.from('entries').select('*').not('deleted_at', 'is', null).gte('deleted_at', since).order('deleted_at', { ascending: false }).limit(500);
+    if (error) {
+      toastError(`Couldn't load deleted entries: ${error.message}`);
+      return null;
+    }
+    return (data ?? []) as Entry[];
+  }
+
+  /** Bring a soft-deleted entry back. */
+  async restore(e: Entry): Promise<boolean> {
+    try {
+      await this.update(e.id, { deleted_at: null }, { expectedUpdatedAt: e.updated_at });
+      toast('Restored');
+      return true;
     } catch {
-      return null; // toast already shown
+      return false;
     }
   }
 
@@ -316,7 +344,7 @@ class Store {
     const { error } = await sb.from('household_prefs').upsert({ household_id: this.caregiver!.household_id, prefs: next });
     if (error) {
       this.prefs = prev;
-      toast(`Couldn't save preference: ${error.message}`);
+      toastError(`Couldn't save preference: ${error.message}`);
     }
   }
 
@@ -325,7 +353,7 @@ class Store {
     const sb = supabase();
     const { rows, error } = await this.fetchAll(() => sb.from('entries').select('*'));
     if (error) {
-      toast(`Export failed: ${error}`);
+      toastError(`Export failed: ${error}`);
       return null;
     }
     return rows.sort((a, b) => a.started_at.localeCompare(b.started_at));

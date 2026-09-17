@@ -20,7 +20,7 @@
 <style>
   .hdr {
     display: flex; align-items: center; gap: 16px;
-    padding: calc(var(--safe-t) + 16px) 20px 12px;
+    padding: 16px 20px 12px;
   }
   .avatar {
     width: 64px; height: 64px; border-radius: 50%; flex: none;
@@ -33,9 +33,10 @@
   .rt.offline { background: var(--danger); }
   .who { flex: 1; min-width: 0; }
   h1 { font-size: 40px; line-height: 1.05; }
-  .sub { white-space: nowrap; font-size: 16px; }
+  .sub { font-size: 16px; }
+  .sep { white-space: nowrap; }
   .sep { margin: 0 6px; }
-  .actions { display: flex; gap: 8px; align-self: flex-end; }
+  .actions { display: flex; gap: 8px; align-self: flex-end; flex: none; }
   .pill {
     width: 48px; height: 44px; border-radius: 10px; border: 1px solid var(--rule); display: grid; place-items: center;
     color: var(--text);

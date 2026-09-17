@@ -84,3 +84,27 @@ describe('groupByDay', () => {
     expect(days[0].entries.map((e) => e.id)).toEqual([c.id, b.id]);
   });
 });
+
+describe('running timer clock (audit v2 F01)', () => {
+  const running = mk('breastfeed', '2026-09-16T18:55:00Z', {
+    left_s: 0, right_s: 0, manual: false, begin_side: 'left', end_side: null,
+    segments: [{ side: 'left', start: '2026-09-16T18:55:00Z', end: null }]
+  });
+  const noon = new Date('2026-09-16T19:00:00Z'); // 12:00 PDT
+  const midnight = new Date('2026-09-16T07:00:00Z');
+  const nextMidnight = new Date('2026-09-17T07:00:00Z');
+
+  it('History (window ending at the next midnight) counts only what has elapsed so far', () => {
+    const s = summarize([running], midnight, nextMidnight, undefined, noon);
+    expect(s.breastfeed.total_s).toBe(300);
+  });
+
+  it('never counts past the window end even if now is later', () => {
+    const s = summarize([running], midnight, new Date('2026-09-16T18:57:00Z'), undefined, noon);
+    expect(s.breastfeed.total_s).toBe(120);
+  });
+
+  it('defaults the clock to the window end for Summary-style callers', () => {
+    expect(summarize([running], midnight, noon).breastfeed.total_s).toBe(300);
+  });
+});

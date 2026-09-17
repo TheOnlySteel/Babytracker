@@ -1,7 +1,8 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
   import type { BreastfeedPayload } from '$lib/data/types';
-  import { store } from '$lib/data/store.svelte';
+  import { store, ConflictError } from '$lib/data/store.svelte';
+  import { toastError } from '$lib/data/toast.svelte';
   import { openSheet, ui } from '$lib/data/ui.svelte';
   import { runningElapsed } from '$lib/data/derive';
   import { fmtDuration } from '$lib/data/format';
@@ -34,8 +35,8 @@
         { ended_at: now.toISOString(), payload: { ...p, segments: segs, left_s: done.left_s, right_s: done.right_s, end_side: last?.side ?? p.begin_side, manual: false } },
         { undoLabel: `Logged ${fmtDuration(done.left_s + done.right_s)} breastfeed`, expectedUpdatedAt: cur.updated_at }
       );
-    } catch {
-      /* toast shown */
+    } catch (e) {
+      if (e instanceof ConflictError) toastError('The timer changed on the other phone; showing the latest.');
     } finally {
       stopping = false;
     }
@@ -46,7 +47,7 @@
   <div class="banner">
     <button class="open" onclick={() => openSheet('breastfeed', running)}>
       <span class="dot" class:paused={!el.open}></span>
-      <span class="txt">Breastfeeding {el.open ? `· ${el.open}` : '· paused'}</span>
+      <span class="txt">Breastfeeding {el.open ? `· ${el.open}` : '· paused'}{#if store.realtime === 'offline'}<span class="rt"> · reconnecting</span>{/if}</span>
       <span class="clock">{clock(el.left_s + el.right_s)}</span>
     </button>
     <button class="stop" onclick={stop} disabled={stopping}>Stop</button>
@@ -54,11 +55,13 @@
 {/if}
 
 <style>
+  /* Positioned by the layout's sticky stack, so it can never be covered by the sync banner. */
   .banner {
-    position: sticky; top: 0; z-index: 20; width: 100%;
-    display: flex; align-items: center; gap: 8px; padding: calc(var(--safe-t) + 6px) 12px 6px 20px;
+    width: 100%;
+    display: flex; align-items: center; gap: 8px; padding: 6px 12px 6px 20px;
     background: var(--feed); color: var(--ink); font-weight: 600;
   }
+  .rt { font-weight: 400; opacity: 0.8; }
   .open { flex: 1; display: flex; align-items: center; gap: 12px; min-height: 44px; text-align: left; }
   .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--danger); animation: pulse 1.2s infinite; }
   .dot.paused { background: var(--ink); animation: none; opacity: 0.5; }

@@ -28,9 +28,12 @@ export function inWindow(e: Entry, from: Date, to: Date): boolean {
 }
 
 /**
+ * @param to       end of the aggregation window (may be in the future, e.g. History's next midnight)
  * @param birthDate used for the black-stool flag (meconium is normal in the first week)
+ * @param now      the clock for a still-running timer; open segments are counted up to
+ *                 min(now, to), never into the future. Defaults to `to` for callers whose window ends now.
  */
-export function summarize(entries: Entry[], from: Date, to: Date, birthDate?: string): Summary {
+export function summarize(entries: Entry[], from: Date, to: Date, birthDate?: string, now?: Date): Summary {
   const s: Summary = {
     breastfeed: { count: 0, total_s: 0, left_s: 0, right_s: 0 },
     bottle: { count: 0, total_ml: 0, breast_milk_ml: 0, formula_ml: 0 },
@@ -38,6 +41,7 @@ export function summarize(entries: Entry[], from: Date, to: Date, birthDate?: st
     pump: { count: 0, total_ml: 0, left_ml: 0, right_ml: 0 }
   };
   const day7 = birthDate ? new Date(birthDate).getTime() + 7 * 86400 * 1000 : 0;
+  const clock = new Date(Math.min((now ?? to).getTime(), to.getTime()));
 
   for (const e of entries) {
     if (e.deleted_at || !inWindow(e, from, to)) continue;
@@ -48,7 +52,7 @@ export function summarize(entries: Entry[], from: Date, to: Date, birthDate?: st
         s.breastfeed.count++;
         if (e.ended_at === null && p.segments?.length) {
           // Running timer: count what has elapsed so far, so Summary agrees with the clock.
-          const el = runningElapsed(p, to);
+          const el = runningElapsed(p, clock);
           s.breastfeed.left_s += el.left_s;
           s.breastfeed.right_s += el.right_s;
         } else {
