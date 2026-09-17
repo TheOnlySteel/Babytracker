@@ -22,7 +22,7 @@
 <style>
   .tabs {
     position: fixed; left: 0; right: 0; bottom: 0; z-index: 30;
-    height: calc(var(--tab-h) + var(--safe-b)); padding-bottom: var(--safe-b);
+    height: calc(var(--tab-h) + var(--safe-b)); padding: 0 var(--safe-r) var(--safe-b) var(--safe-l);
     background: rgba(27, 32, 48, 0.94); backdrop-filter: blur(12px);
     border-top: 1px solid var(--rule);
     display: grid; grid-auto-flow: column; grid-auto-columns: 1fr;

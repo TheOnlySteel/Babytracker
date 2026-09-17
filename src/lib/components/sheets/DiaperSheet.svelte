@@ -3,10 +3,11 @@
   import { ChevronDown, ChevronUp } from '@lucide/svelte';
   import type { DiaperColor, DiaperPayload, Entry, Texture } from '$lib/data/types';
   import { TEXTURES, DIAPER_COLORS, DIAPER_SWATCH } from '$lib/data/types';
-  import { store } from '$lib/data/store.svelte';
-  import { closeSheet } from '$lib/data/ui.svelte';
+  import { store, ConflictError } from '$lib/data/store.svelte';
+  import { closeSheet, openSheet } from '$lib/data/ui.svelte';
   import { lastOf } from '$lib/data/derive';
   import Sheet from '$lib/ui/Sheet.svelte';
+  import ConflictBar from '$lib/ui/ConflictBar.svelte';
   import TimeRow from '$lib/ui/TimeRow.svelte';
   import NoteRow from '$lib/ui/NoteRow.svelte';
 
@@ -26,6 +27,11 @@
   let note = $state(editing?.note ?? '');
   let detailOpen = $state(p?.dirty ?? false);
   let saving = $state(false);
+  let version = $state(editing?.updated_at);
+  let conflict = $state<Entry | null>(null);
+  const snapshot = () => JSON.stringify([startedAt.getTime(), wet, dirty, dry, texture, color, blowout, rash, note]);
+  const initial = snapshot();
+  const isDirty = $derived(snapshot() !== initial);
 
   function setKind(k: 'wet' | 'dirty' | 'dry') {
     if (k === 'dry') {
@@ -52,23 +58,26 @@
     const payload: DiaperPayload = { wet, dirty, dry, texture: dirty ? [...texture] : [], color: dirty ? [...color] : [], blowout, rash };
     saving = true;
     try {
-      if (editing) await store.update(editing.id, { started_at: startedAt.toISOString(), payload, note: note || null }, { undoLabel: 'Updated diaper', expectedUpdatedAt: editing.updated_at });
+      if (editing) await store.update(editing.id, { started_at: startedAt.toISOString(), payload, note: note || null }, { undoLabel: 'Updated diaper', expectedUpdatedAt: version });
       else await store.insert({ type: 'diaper', started_at: startedAt, payload, note: note || null }, { undoLabel: `Logged ${wet && dirty ? 'wet + dirty' : dirty ? 'dirty' : wet ? 'wet' : 'dry'} diaper` });
       closeSheet();
-    } catch {
-      /* toast shown; keep the form */
+    } catch (e) {
+      if (e instanceof ConflictError && e.latest) conflict = e.latest;
     } finally {
       saving = false;
     }
   }
   async function del() {
     if (!editing) return;
-    await store.remove(editing.id, 'Diaper deleted', editing.updated_at);
+    await store.remove(editing.id, 'Diaper deleted', version);
     closeSheet();
   }
 </script>
 
-<Sheet title="Diaper" color="var(--diaper)" dark onsave={save} {saving}>
+<Sheet title="Diaper" color="var(--diaper)" dark onsave={save} {saving} dirty={isDirty}>
+  {#if conflict}
+    <ConflictBar latest={conflict} onUseTheirs={() => openSheet('diaper', conflict!)} onKeepMine={() => { version = conflict!.updated_at; conflict = null; save(); }} />
+  {/if}
   <TimeRow label="Time" bind:value={startedAt} />
 
   <div class="circles">
@@ -115,7 +124,7 @@
 
   {#snippet footer()}
     {#if editing}
-      <button class="btn-ghost danger" onclick={del}>Delete</button>
+      <button class="btn-link danger" onclick={del} disabled={saving}>Delete</button>
     {/if}
   {/snippet}
 </Sheet>
@@ -136,5 +145,4 @@
   .blob.mushy { border-radius: 55% 45% 50% 50% / 45% 55% 45% 55%; }
   .blob.solid { border-radius: 50% 50% 20% 20%; width: 40px; }
   .blob.pebbles { background: radial-gradient(circle at 30% 30%, var(--diaper) 8px, transparent 9px), radial-gradient(circle at 70% 35%, var(--diaper) 7px, transparent 8px), radial-gradient(circle at 45% 70%, var(--diaper) 9px, transparent 10px); }
-  .danger { color: var(--danger); border-color: var(--danger); width: 100%; }
 </style>

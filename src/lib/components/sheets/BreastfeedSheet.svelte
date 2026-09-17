@@ -1,12 +1,13 @@
 <script lang="ts">
   import { onMount, onDestroy, untrack } from 'svelte';
   import type { BreastfeedPayload, Entry, Side } from '$lib/data/types';
-  import { store } from '$lib/data/store.svelte';
-  import { closeSheet } from '$lib/data/ui.svelte';
+  import { store, ConflictError } from '$lib/data/store.svelte';
+  import { closeSheet, openSheet } from '$lib/data/ui.svelte';
   import { lastOf, runningElapsed } from '$lib/data/derive';
   import { fmtDuration } from '$lib/data/format';
   import { nonNegative } from '$lib/data/validate';
   import Sheet from '$lib/ui/Sheet.svelte';
+  import ConflictBar from '$lib/ui/ConflictBar.svelte';
   import TimeRow from '$lib/ui/TimeRow.svelte';
   import NoteRow from '$lib/ui/NoteRow.svelte';
 
@@ -34,12 +35,22 @@
   let note = $state(editing?.note ?? '');
   let saving = $state(false);
   let err = $state('');
+  /** Version token the next save is conditional on. Advanced only by an explicit "Keep mine". */
+  let version = $state(editing?.updated_at);
+  let conflict = $state<Entry | null>(null);
   let tick = $state(new Date());
   let timer: ReturnType<typeof setInterval>;
   let wake: { release(): Promise<void> } | null = null;
-  let pending: Promise<unknown> = Promise.resolve();
+
+  /** Timer transitions run one at a time; while one is in flight the buttons show it and ignore taps. */
+  let pendingSide = $state<Side | null>(null);
+  let queue: Promise<unknown> = Promise.resolve();
 
   const elapsed = $derived(running ? runningElapsed(running.payload as BreastfeedPayload, tick) : null);
+  const snapshot = () => JSON.stringify([startedAt.getTime(), leftMin, rightMin, note]);
+  const initial = snapshot();
+  // A fresh timer sheet with nothing typed is never "dirty": a running timer lives in the database, not the form.
+  const dirty = $derived(snapshot() !== initial);
 
   async function acquireWake() {
     try {
@@ -64,9 +75,18 @@
     wake?.release().catch(() => {});
   });
 
-  /** Timer transitions are serialised so two quick taps can't race each other. */
   function tap(side: Side) {
-    pending = pending.then(() => transition(side)).catch(() => {});
+    if (pendingSide || saving) return; // one intended operation per tap; no queued start+pause surprises
+    pendingSide = side;
+    queue = queue
+      .then(() => transition(side))
+      .catch((e) => {
+        if (e instanceof ConflictError) {
+          // The other phone moved the timer; the store already refreshed it. Nothing to reapply for a tap.
+          err = 'The timer changed on the other phone; showing the latest.';
+        }
+      })
+      .finally(() => (pendingSide = null));
   }
   async function transition(side: Side) {
     const now = new Date();
@@ -99,21 +119,25 @@
     const left_s = Math.round((l.value ?? 0) * 60);
     const right_s = Math.round((r.value ?? 0) * 60);
     if (left_s + right_s <= 0) {
-      err = 'Enter a duration';
+      err = 'Enter a duration, or tap Left or Right to start the timer';
       return null;
     }
     return { left_s, right_s };
   }
 
   async function save() {
+    if (saving) return;
     err = '';
     saving = true;
     try {
+      // Let any in-flight Start/Pause/Switch finish first, then act on the timer as it now is.
+      await queue;
       if (mode === 'edit') await saveEdit();
       else await saveTimer();
       closeSheet();
-    } catch {
-      /* toasts already explain; keep the sheet open so nothing typed is lost */
+    } catch (e) {
+      if (e instanceof ConflictError && e.latest) conflict = e.latest;
+      /* other failures already produced a persistent toast; keep the form so nothing typed is lost */
     } finally {
       saving = false;
     }
@@ -130,7 +154,7 @@
       // Typing durations is the explicit "convert to manual" action: segments no longer describe the feed.
       const payload = { ...p, begin_side, end_side, left_s: d.left_s, right_s: d.right_s, manual: true, segments: [] };
       const ended = new Date(startedAt.getTime() + (d.left_s + d.right_s) * 1000);
-      await store.update(e.id, { started_at: startedAt.toISOString(), ended_at: ended.toISOString(), payload, note: note || null }, { undoLabel: 'Updated breastfeed', expectedUpdatedAt: e.updated_at });
+      await store.update(e.id, { started_at: startedAt.toISOString(), ended_at: ended.toISOString(), payload, note: note || null }, { undoLabel: 'Updated breastfeed', expectedUpdatedAt: version });
       return;
     }
     // Note or start-time only: keep exact seconds, segments and the original wall-clock length.
@@ -141,11 +165,11 @@
       patch.ended_at = e.ended_at ? new Date(new Date(e.ended_at).getTime() + delta).toISOString() : null;
       if (p.segments?.length) {
         const shifted = p.segments.map((s) => ({ ...s, start: new Date(new Date(s.start).getTime() + delta).toISOString(), end: s.end ? new Date(new Date(s.end).getTime() + delta).toISOString() : null }));
-        await store.update(e.id, { ...patch, payload: { ...p, segments: shifted } }, { undoLabel: 'Updated breastfeed', expectedUpdatedAt: e.updated_at });
+        await store.update(e.id, { ...patch, payload: { ...p, segments: shifted } }, { undoLabel: 'Updated breastfeed', expectedUpdatedAt: version });
         return;
       }
     }
-    await store.update(e.id, patch, { undoLabel: 'Updated breastfeed', expectedUpdatedAt: e.updated_at });
+    await store.update(e.id, patch, { undoLabel: 'Updated breastfeed', expectedUpdatedAt: version });
   }
 
   async function saveTimer() {
@@ -178,7 +202,7 @@
   }
 
   async function discard() {
-    if (mode === 'edit') await store.remove(editing!.id, 'Breastfeed deleted', editing!.updated_at);
+    if (mode === 'edit') await store.remove(editing!.id, 'Breastfeed deleted', version);
     else if (running) await store.remove(running.id, 'Timer discarded', running.updated_at);
     closeSheet();
   }
@@ -190,20 +214,27 @@
     return v === '' ? null : Number(v);
   };
   const clock = (s: number) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+  const busy = $derived(pendingSide !== null || saving);
 </script>
 
-<Sheet title="Breastfeed" color="var(--feed)" dark onsave={save} {saving}>
+<Sheet title="Breastfeed" color="var(--feed)" dark onsave={save} saving={busy} {dirty}>
   {#if mode === 'timer'}
-    <div class="sides">
-      <button class="side" class:on={elapsed?.open === 'left'} class:hint={!running && suggested === 'left'} onclick={() => tap('left')}>
+    <div class="sides" aria-busy={pendingSide !== null}>
+      <button class="side" class:on={elapsed?.open === 'left'} class:hint={!running && suggested === 'left'} class:pending={pendingSide === 'left'} onclick={() => tap('left')} disabled={busy}>
         <span class="name">Left</span>
         <span class="clock">{elapsed ? clock(elapsed.left_s) : '0:00'}</span>
-        {#if elapsed?.open === 'left'}<span class="state">tap to pause</span>{:else if !running && suggested === 'left'}<span class="state">next side</span>{:else}<span class="state">&nbsp;</span>{/if}
+        {#if pendingSide === 'left'}<span class="state">{running ? 'saving…' : 'starting…'}</span>
+        {:else if elapsed?.open === 'left'}<span class="state">tap to pause</span>
+        {:else if !running && suggested === 'left'}<span class="state">next side</span>
+        {:else}<span class="state">&nbsp;</span>{/if}
       </button>
-      <button class="side" class:on={elapsed?.open === 'right'} class:hint={!running && suggested === 'right'} onclick={() => tap('right')}>
+      <button class="side" class:on={elapsed?.open === 'right'} class:hint={!running && suggested === 'right'} class:pending={pendingSide === 'right'} onclick={() => tap('right')} disabled={busy}>
         <span class="name">Right</span>
         <span class="clock">{elapsed ? clock(elapsed.right_s) : '0:00'}</span>
-        {#if elapsed?.open === 'right'}<span class="state">tap to pause</span>{:else if !running && suggested === 'right'}<span class="state">next side</span>{:else}<span class="state">&nbsp;</span>{/if}
+        {#if pendingSide === 'right'}<span class="state">{running ? 'saving…' : 'starting…'}</span>
+        {:else if elapsed?.open === 'right'}<span class="state">tap to pause</span>
+        {:else if !running && suggested === 'right'}<span class="state">next side</span>
+        {:else}<span class="state">&nbsp;</span>{/if}
       </button>
     </div>
     {#if elapsed}
@@ -211,6 +242,18 @@
     {:else}
       <p class="muted or">or type the durations below</p>
     {/if}
+  {/if}
+
+  {#if conflict}
+    <ConflictBar
+      latest={conflict}
+      onUseTheirs={() => openSheet('breastfeed', conflict!)}
+      onKeepMine={() => {
+        version = conflict!.updated_at;
+        conflict = null;
+        save();
+      }}
+    />
   {/if}
 
   {#if mode === 'edit' || !running || durationsTouched}
@@ -234,7 +277,7 @@
 
   {#snippet footer()}
     {#if mode === 'edit' || running}
-      <button class="btn-ghost danger" onclick={discard}>{mode === 'edit' ? 'Delete' : 'Discard timer'}</button>
+      <button class="btn-link danger" onclick={discard} disabled={busy}>{mode === 'edit' ? 'Delete' : 'Discard timer'}</button>
     {/if}
   {/snippet}
 </Sheet>
@@ -247,6 +290,8 @@
   }
   .side.hint { background: var(--accent-soft); }
   .side.on { background: var(--accent); color: #fff; }
+  .side.pending { opacity: 0.85; border-style: dashed; }
+  .side:disabled:not(.pending) { opacity: 0.6; }
   .name { font-family: var(--serif); font-size: 26px; }
   .clock { font-family: var(--serif); font-size: 40px; font-variant-numeric: tabular-nums; line-height: 1; }
   .state { font-size: 13px; opacity: 0.8; }
@@ -256,5 +301,4 @@
   .amt input { width: 80px; text-align: right; background: var(--card-2); border: 0; border-radius: 8px; padding: 8px 10px; font-size: 20px; outline: none; }
   .hint-text { margin: 0; padding: 8px 20px; font-size: 14px; }
   .err { margin: 0; padding: 8px 20px; color: var(--danger); font-size: 15px; }
-  .danger { color: var(--danger); border-color: var(--danger); width: 100%; }
 </style>

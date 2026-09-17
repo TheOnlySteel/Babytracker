@@ -2,8 +2,12 @@
   import { store } from '$lib/data/store.svelte';
   import { toast } from '$lib/data/toast.svelte';
   import type { Entry } from '$lib/data/types';
+  import { entryLabel } from '$lib/data/derive';
+  import { fmtWhen } from '$lib/data/format';
 
   let exporting = $state(false);
+  let deleted = $state<Entry[] | null>(null);
+  let loadingDeleted = $state(false);
 
   function download(name: string, mime: string, body: string) {
     const url = URL.createObjectURL(new Blob([body], { type: mime }));
@@ -33,18 +37,28 @@
     return [head, ...lines].join('\n');
   }
 
-  async function exportAll() {
+  async function exportAll(format: 'json' | 'csv') {
     exporting = true;
     try {
       const rows = await store.fetchEverything();
       if (!rows) return;
       const stamp = new Date().toISOString().slice(0, 10);
-      download(`babytracker-${stamp}.json`, 'application/json', JSON.stringify({ exported_at: new Date().toISOString(), child: store.child, caregivers: store.caregivers, entries: rows }, null, 2));
-      download(`babytracker-${stamp}.csv`, 'text/csv', toCsv(rows));
-      toast(`Exported ${rows.length} entries`);
+      // One file per tap: iOS Safari only reliably delivers a single download per user gesture.
+      if (format === 'json') download(`babytracker-${stamp}.json`, 'application/json', JSON.stringify({ exported_at: new Date().toISOString(), child: store.child, caregivers: store.caregivers, entries: rows }, null, 2));
+      else download(`babytracker-${stamp}.csv`, 'text/csv', toCsv(rows));
+      toast(`Exported ${rows.length} entries as ${format.toUpperCase()}`);
     } finally {
       exporting = false;
     }
+  }
+
+  async function showDeleted() {
+    loadingDeleted = true;
+    deleted = await store.fetchDeleted(30);
+    loadingDeleted = false;
+  }
+  async function restore(e: Entry) {
+    if (await store.restore(e)) deleted = (deleted ?? []).filter((d) => d.id !== e.id);
   }
 </script>
 
@@ -60,11 +74,38 @@
       <span class="row-value" class:muted={store.realtime !== 'live'}>{store.realtime === 'live' ? 'Live' : store.realtime === 'offline' ? 'Reconnecting…' : 'Connecting…'}</span>
     </div>
   </div>
+
+  <div class="card">
+    <div class="row col">
+      <span class="row-label">Recently deleted</span>
+      <span class="muted">Anything deleted in the last 30 days can be put back.</span>
+      {#if deleted === null}
+        <button class="btn-ghost" onclick={showDeleted} disabled={loadingDeleted}>{loadingDeleted ? 'Loading…' : 'Show deleted entries'}</button>
+      {:else if deleted.length === 0}
+        <span class="muted">Nothing deleted in the last 30 days.</span>
+      {/if}
+    </div>
+    {#if deleted?.length}
+      {#each deleted as e (e.id)}
+        <div class="row del">
+          <div class="what">
+            <div>{fmtWhen(e.started_at)} · {entryLabel(e)}</div>
+            <div class="muted small">deleted {fmtWhen(e.deleted_at!)}</div>
+          </div>
+          <button class="btn-ghost" onclick={() => restore(e)}>Restore</button>
+        </div>
+      {/each}
+    {/if}
+  </div>
+
   <div class="card">
     <div class="row col">
       <span class="row-label">Backup</span>
-      <span class="muted">Downloads every entry, including soft-deleted ones, as JSON and CSV. Do this now and then; the free database tier has no point-in-time recovery.</span>
-      <button class="btn-ghost" onclick={exportAll} disabled={exporting}>{exporting ? 'Exporting…' : 'Export everything'}</button>
+      <span class="muted">Downloads every entry, including deleted ones. Do this now and then; the free database tier has no point-in-time recovery.</span>
+      <div class="pair">
+        <button class="btn-ghost" onclick={() => exportAll('json')} disabled={exporting}>Export JSON</button>
+        <button class="btn-ghost" onclick={() => exportAll('csv')} disabled={exporting}>Export CSV</button>
+      </div>
     </div>
   </div>
   <div class="card">
@@ -77,9 +118,13 @@
 </main>
 
 <style>
-  main { padding: calc(var(--safe-t) + 24px) 16px calc(var(--tab-h) + var(--safe-b) + 24px); display: flex; flex-direction: column; gap: 16px; }
+  main { padding: 24px 16px calc(var(--tab-h) + var(--safe-b) + 24px); display: flex; flex-direction: column; gap: 16px; }
   h2 { font-size: 30px; padding: 0 4px; }
   .card { background: var(--card); border-radius: var(--radius); overflow: hidden; }
   .card .row:last-child { border-bottom: 0; }
   .col { flex-direction: column; align-items: flex-start; gap: 10px; }
+  .pair { display: flex; gap: 10px; }
+  .del { gap: 12px; }
+  .what { flex: 1; min-width: 0; font-size: 16px; }
+  .small { font-size: 13px; }
 </style>

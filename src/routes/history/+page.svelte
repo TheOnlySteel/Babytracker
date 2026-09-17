@@ -25,7 +25,7 @@
     const [y, m, d] = day.split('-').map(Number);
     const from = new Date(y, m - 1, d);
     const to = new Date(y, m - 1, d + 1);
-    return summarize(entries, from, to, store.child?.birth_date);
+    return summarize(entries, from, to, store.child?.birth_date, store.now);
   }
   async function older() {
     loading = true;

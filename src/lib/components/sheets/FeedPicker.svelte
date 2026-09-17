@@ -1,26 +1,26 @@
 <script lang="ts">
-  import { openSheet, closeSheet } from '$lib/data/ui.svelte';
+  import { X } from '@lucide/svelte';
+  import { openSheet } from '$lib/data/ui.svelte';
+  import Modal from '$lib/ui/Modal.svelte';
   import Icon from '$lib/ui/Icon.svelte';
-  function onkeydown(e: KeyboardEvent) {
-    if (e.key === 'Escape') closeSheet();
-  }
+  let modal: Modal;
 </script>
 
-<svelte:window {onkeydown} />
-<div class="scrim" role="presentation" onclick={closeSheet}></div>
-<div class="picker" role="dialog" aria-label="Choose feed type">
-  <button onclick={() => openSheet('breastfeed')}><Icon kind="breast" size={56} /><span>Breastfeed</span></button>
-  <button onclick={() => openSheet('bottle')}><Icon kind="bottle" size={56} /><span>Bottle Feed</span></button>
-</div>
+<Modal label="Choose feed type" variant="picker" bind:this={modal}>
+  <div class="head">
+    <span class="title">Log a feed</span>
+    <button class="close" onclick={() => modal.requestClose()} aria-label="Close"><X size={26} /></button>
+  </div>
+  <button class="opt" onclick={() => openSheet('breastfeed')} data-autofocus><Icon kind="breast" size={56} /><span>Breastfeed</span></button>
+  <button class="opt" onclick={() => openSheet('bottle')}><Icon kind="bottle" size={56} /><span>Bottle Feed</span></button>
+  <div class="pad"></div>
+</Modal>
 
 <style>
-  .scrim { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.45); z-index: 40; }
-  .picker {
-    position: fixed; left: 0; right: 0; bottom: 0; z-index: 41; background: #2a3142;
-    border-radius: 20px 20px 0 0; padding: 16px 0 calc(var(--safe-b) + 16px);
-    animation: rise 200ms cubic-bezier(0.2, 0.8, 0.2, 1);
-  }
-  button { display: flex; align-items: center; gap: 24px; width: 100%; padding: 16px 32px; min-height: 96px; text-align: left; }
-  span { font-family: var(--serif); font-size: 30px; }
-  @keyframes rise { from { transform: translateY(100%); } to { transform: translateY(0); } }
+  .head { display: flex; align-items: center; justify-content: space-between; padding: 12px 12px 4px 32px; }
+  .title { font-size: 15px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; }
+  .close { width: 48px; height: 48px; display: grid; place-items: center; border-radius: 50%; color: var(--text); }
+  .opt { display: flex; align-items: center; gap: 24px; width: 100%; padding: 16px 32px; min-height: 96px; text-align: left; }
+  .opt span { font-family: var(--serif); font-size: 30px; }
+  .pad { height: calc(var(--safe-b) + 8px); }
 </style>

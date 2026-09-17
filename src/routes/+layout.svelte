@@ -55,15 +55,20 @@
 {:else if !store.loaded}
   <main class="msg"><p class="muted">Loading…</p></main>
 {:else}
-  {#if store.syncError}
-    <div class="sync" role="status">
-      <span>Can't reach the server. Showing what was loaded last.</span>
-      <button onclick={() => store.refreshEntries()}>Retry</button>
+  <!-- Everything a modal must isolate lives under #app-root; modals and toasts render beside it. -->
+  <div id="app-root">
+    <div class="top-stack">
+      {#if store.syncError}
+        <div class="sync" role="status">
+          <span>Can't reach the server. Showing what was loaded last.</span>
+          <button onclick={() => store.refreshEntries()}>Retry</button>
+        </div>
+      {/if}
+      <TimerBanner />
     </div>
-  {/if}
-  <TimerBanner />
-  {@render children()}
-  <TabBar />
+    {@render children()}
+    <TabBar />
+  </div>
   <SheetHost />
 {/if}
 <Toasts />
@@ -74,9 +79,11 @@
   .small { font-size: 13px; word-break: break-all; }
   .err { color: var(--danger); }
   code { background: var(--card); padding: 2px 6px; border-radius: 6px; font-size: 0.9em; }
+  /* One sticky stack: safe-area padding applied once, banners never overlap each other. */
+  .top-stack { position: sticky; top: 0; z-index: 20; padding-top: var(--safe-t); background: var(--bg); }
   .sync {
-    position: sticky; top: 0; z-index: 21; display: flex; align-items: center; justify-content: space-between; gap: 12px;
-    padding: calc(var(--safe-t) + 8px) 16px 8px; background: var(--danger); color: #fff; font-size: 14px; font-weight: 600;
+    display: flex; align-items: center; justify-content: space-between; gap: 12px;
+    padding: 6px 12px 6px 16px; background: var(--danger); color: #fff; font-size: 14px; font-weight: 600;
   }
-  .sync button { min-height: 36px; padding: 0 12px; border: 1.5px solid #fff; border-radius: 18px; color: #fff; }
+  .sync button { min-height: 44px; min-width: 64px; padding: 0 14px; border: 1.5px solid #fff; border-radius: 22px; color: #fff; }
 </style>

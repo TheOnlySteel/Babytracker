@@ -23,19 +23,20 @@
       signIn();
     }}
   >
-    <input type="email" bind:value={email} placeholder="Email" autocomplete="username" required />
-    <input type="password" bind:value={password} placeholder="Password" autocomplete="current-password" required />
+    <label>Email<input type="email" bind:value={email} autocomplete="username" required /></label>
+    <label>Password<input type="password" bind:value={password} autocomplete="current-password" required /></label>
     <button class="btn-primary" disabled={busy || !email || !password}>{busy ? 'Signing in…' : 'Sign in'}</button>
   </form>
   {#if error}<p class="err">{error}</p>{/if}
-  <p class="muted small">Forgot it? Reset it in the Supabase dashboard under Authentication → Users.</p>
+  <p class="muted small">Forgot the password? The other caregiver can reset it from the Supabase dashboard (Authentication → Users → Reset password); no email is sent by this app.</p>
 </main>
 
 <style>
   .signin { padding: calc(var(--safe-t) + 80px) 24px 24px; max-width: 420px; margin: 0 auto; }
   h1 { font-size: 48px; margin-bottom: 8px; }
   form { display: flex; flex-direction: column; gap: 12px; margin-top: 24px; }
-  input { min-height: 52px; padding: 0 16px; border-radius: 12px; border: 1px solid var(--rule); background: var(--card); font-size: 18px; outline: none; }
+  label { display: flex; flex-direction: column; gap: 6px; font-size: 15px; color: var(--muted); }
+  input { width: 100%; min-height: 52px; padding: 0 16px; border-radius: 12px; border: 1px solid var(--rule); background: var(--card); font-size: 18px; outline: none; }
   input:focus { border-color: var(--accent); }
   .err { color: var(--danger); }
   .small { font-size: 14px; margin-top: 24px; }

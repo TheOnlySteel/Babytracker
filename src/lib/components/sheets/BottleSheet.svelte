@@ -2,11 +2,12 @@
   import { untrack } from 'svelte';
   import { Plus, ChevronRight } from '@lucide/svelte';
   import type { BottleKind, BottlePayload, Entry } from '$lib/data/types';
-  import { store } from '$lib/data/store.svelte';
-  import { closeSheet } from '$lib/data/ui.svelte';
+  import { store, ConflictError } from '$lib/data/store.svelte';
+  import { closeSheet, openSheet } from '$lib/data/ui.svelte';
   import { recentAmounts, lastOf } from '$lib/data/derive';
   import { nonNegative } from '$lib/data/validate';
   import Sheet from '$lib/ui/Sheet.svelte';
+  import ConflictBar from '$lib/ui/ConflictBar.svelte';
   import TimeRow from '$lib/ui/TimeRow.svelte';
   import NoteRow from '$lib/ui/NoteRow.svelte';
 
@@ -33,6 +34,11 @@
   let showBrands = $state(false);
   let saving = $state(false);
   let err = $state('');
+  let version = $state(editing?.updated_at);
+  let conflict = $state<Entry | null>(null);
+  const snapshot = () => JSON.stringify([kinds, startedAt.getTime(), brand, breastMl, formulaMl, amount, note]);
+  const initial = snapshot();
+  const dirty = $derived(snapshot() !== initial);
 
   const both = $derived(kinds.length === 2);
   const hasFormula = $derived(kinds.includes('formula'));
@@ -75,12 +81,13 @@
     if (total <= 0) return void (err = 'Enter an amount');
     saving = true;
     try {
-      if (editing) await store.update(editing.id, { started_at: startedAt.toISOString(), payload, note: note || null }, { undoLabel: 'Updated bottle', expectedUpdatedAt: editing.updated_at });
+      if (editing) await store.update(editing.id, { started_at: startedAt.toISOString(), payload, note: note || null }, { undoLabel: 'Updated bottle', expectedUpdatedAt: version });
       else await store.insert({ type: 'bottle', started_at: startedAt, payload, note: note || null }, { undoLabel: `Logged ${total} mL bottle` });
       if (hasFormula && brand && brand !== store.prefs.last_formula_brand) store.savePrefs({ last_formula_brand: brand });
       closeSheet();
-    } catch {
-      /* toast shown; keep the form */
+    } catch (e) {
+      if (e instanceof ConflictError && e.latest) conflict = e.latest;
+      /* other failures: persistent toast; keep the form */
     } finally {
       saving = false;
     }
@@ -88,7 +95,7 @@
 
   async function del() {
     if (!editing) return;
-    await store.remove(editing.id, 'Bottle deleted', editing.updated_at);
+    await store.remove(editing.id, 'Bottle deleted', version);
     closeSheet();
   }
 
@@ -99,7 +106,10 @@
   };
 </script>
 
-<Sheet title="Bottle Feed" color="var(--feed)" dark onsave={save} {saving}>
+<Sheet title="Bottle Feed" color="var(--feed)" dark onsave={save} {saving} {dirty}>
+  {#if conflict}
+    <ConflictBar latest={conflict} onUseTheirs={() => openSheet('bottle', conflict!)} onKeepMine={() => { version = conflict!.updated_at; conflict = null; save(); }} />
+  {/if}
   <div class="circles">
     <button class="circle" aria-pressed={kinds.includes('breast_milk')} onclick={() => toggle('breast_milk')}>breast<br />milk</button>
     <button class="circle" aria-pressed={kinds.includes('formula')} onclick={() => toggle('formula')}>formula</button>
@@ -157,7 +167,7 @@
 
   {#snippet footer()}
     {#if editing}
-      <button class="btn-ghost danger" onclick={del}>Delete</button>
+      <button class="btn-link danger" onclick={del} disabled={saving}>Delete</button>
     {/if}
   {/snippet}
 </Sheet>
@@ -170,5 +180,4 @@
   .amt input { width: 80px; text-align: right; background: var(--card-2); border: 0; border-radius: 8px; padding: 8px 10px; font-size: 20px; outline: none; }
   .amounts { padding: 4px 20px 16px; border-bottom: 1px solid var(--rule); }
   .err { margin: 0; padding: 8px 20px; color: var(--danger); font-size: 15px; }
-  .danger { color: var(--danger); border-color: var(--danger); width: 100%; }
 </style>
