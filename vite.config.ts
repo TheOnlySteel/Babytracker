@@ -8,6 +8,9 @@ export default defineConfig({
     SvelteKitPWA({
       registerType: 'autoUpdate',
       strategies: 'generateSW',
+      injectRegister: false,
+      // SPA on adapter-static: precache the fallback page (revision from version.json) so the app shell starts offline.
+      kit: { adapterFallback: 'index.html', spa: true, includeVersionFile: true },
       manifest: {
         name: 'Rosalie',
         short_name: 'Rosalie',
@@ -26,9 +29,11 @@ export default defineConfig({
       },
       workbox: {
         globPatterns: ['**/*.{js,css,html,png,svg,webmanifest}'],
-        navigateFallback: '/',
+        navigateFallback: '/index.html',
         // Never cache Supabase traffic; the app is only useful live.
         navigateFallbackDenylist: [/^\/rest\//, /^\/auth\//],
+        // _app/env.js is written by the adapter after the worker is generated; its content is fixed per build.
+        additionalManifestEntries: [{ url: '_app/env.js', revision: String(Date.now()) }],
         runtimeCaching: [
           {
             urlPattern: /^https:\/\/fonts\.(googleapis|gstatic)\.com\//,

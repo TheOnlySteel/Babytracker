@@ -30,7 +30,10 @@
   function setKind(k: 'wet' | 'dirty' | 'dry') {
     if (k === 'dry') {
       dry = !dry;
-      if (dry) { wet = false; dirty = false; }
+      if (dry) {
+        wet = false;
+        dirty = false;
+      }
     } else {
       dry = false;
       if (k === 'wet') wet = !wet;
@@ -49,16 +52,18 @@
     const payload: DiaperPayload = { wet, dirty, dry, texture: dirty ? [...texture] : [], color: dirty ? [...color] : [], blowout, rash };
     saving = true;
     try {
-      if (editing) await store.update(editing.id, { started_at: startedAt.toISOString(), payload, note: note || null }, { undoLabel: 'Updated diaper' });
+      if (editing) await store.update(editing.id, { started_at: startedAt.toISOString(), payload, note: note || null }, { undoLabel: 'Updated diaper', expectedUpdatedAt: editing.updated_at });
       else await store.insert({ type: 'diaper', started_at: startedAt, payload, note: note || null }, { undoLabel: `Logged ${wet && dirty ? 'wet + dirty' : dirty ? 'dirty' : wet ? 'wet' : 'dry'} diaper` });
       closeSheet();
+    } catch {
+      /* toast shown; keep the form */
     } finally {
       saving = false;
     }
   }
   async function del() {
     if (!editing) return;
-    await store.remove(editing.id, 'Diaper deleted');
+    await store.remove(editing.id, 'Diaper deleted', editing.updated_at);
     closeSheet();
   }
 </script>
@@ -122,7 +127,7 @@
   .grid5 { grid-template-columns: repeat(5, 1fr); }
   .grid6 { grid-template-columns: repeat(6, 1fr); }
   .opt { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 8px 2px; border-radius: 12px; min-height: 48px; }
-  .opt[aria-pressed='true'] { background: var(--accent-soft); box-shadow: inset 0 0 0 1.5px var(--accent); }
+  .opt[aria-pressed='true'] { background: var(--accent-soft); box-shadow: inset 0 0 0 1.5px var(--accent-text); }
   .cap { font-size: 15px; text-transform: capitalize; }
   .swatch { width: 44px; height: 44px; border-radius: 45% 55% 50% 50% / 55% 45% 55% 45%; }
   .blob { width: 44px; height: 44px; background: var(--diaper); border-radius: 50%; }

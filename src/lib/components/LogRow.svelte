@@ -7,10 +7,10 @@
   import { store } from '$lib/data/store.svelte';
   import Icon from '$lib/ui/Icon.svelte';
 
-  let { entry, max = 0, onclick, showDay = true, color }: { entry: Entry; max?: number; onclick?: () => void; showDay?: boolean; color?: string } = $props();
+  let { entry, max = { ml: 0, s: 0 }, onclick, showDay = true, color }: { entry: Entry; max?: { ml: number; s: number }; onclick?: () => void; showDay?: boolean; color?: string } = $props();
 
   const mag = $derived(entryMagnitude(entry));
-  const pct = $derived(mag && max > 0 ? Math.max(4, Math.round((mag.value / max) * 100)) : 0);
+  const pct = $derived(mag && max[mag.unit] > 0 ? Math.max(4, Math.round((mag.value / max[mag.unit]) * 100)) : 0);
   const isYesterday = $derived(showDay && dayKey(new Date(entry.started_at)) === dayKey(new Date(store.now.getTime() - 86400_000)));
   const running = $derived(entry.ended_at === null && (entry.type === 'breastfeed' || entry.type === 'pump'));
   const barColor = $derived(color ?? (entry.type === 'diaper' ? 'var(--diaper)' : entry.type === 'pump' ? 'var(--pump)' : 'var(--feed)'));

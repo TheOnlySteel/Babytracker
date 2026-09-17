@@ -7,6 +7,7 @@
   --muted: #a3a9b8;
   --accent: #4b6b9b;
   --accent-soft: rgba(75, 107, 155, 0.18);
+  --accent-text: #8fb0e0;   /* accent for text/borders on dark cards: 6.3:1 on --card */
   --feed: #f5c842;
   --diaper: #efe8d8;
   --pump: #f2a59b;
@@ -64,7 +65,7 @@ h1, h2, h3 { margin: 0; font-family: var(--serif); font-weight: 500; }
 .circles { display: flex; justify-content: center; gap: 16px; padding: 24px 16px; border-bottom: 1px solid var(--rule); }
 .circle {
   width: 90px; height: 90px; border-radius: 50%;
-  border: 1.5px solid var(--accent); color: var(--accent);
+  border: 1.5px solid var(--accent-text); color: var(--accent-text);
   display: grid; place-items: center; text-align: center;
   font-size: 17px; line-height: 1.15; padding: 8px;
   transition: background 120ms, color 120ms;
@@ -75,22 +76,24 @@ h1, h2, h3 { margin: 0; font-family: var(--serif); font-weight: 500; }
 .chips { display: flex; flex-wrap: wrap; gap: 8px; }
 .chip {
   min-height: 44px; padding: 0 16px; border-radius: 22px;
-  border: 1.5px solid var(--accent); color: var(--accent); font-size: 17px;
+  border: 1.5px solid var(--accent-text); color: var(--accent-text); font-size: 17px;
   display: inline-flex; align-items: center; gap: 6px;
 }
 .chip[aria-pressed='true'] { background: var(--accent); color: #fff; font-weight: 600; }
 
-/* iOS-like switch */
-.switch {
-  width: 52px; height: 32px; border-radius: 16px; background: #555b6a; position: relative; flex: none;
-  transition: background 150ms;
+/* iOS-like switch: 44px tall hit area, 32px visual track */
+.switch { width: 60px; height: 44px; position: relative; flex: none; }
+.switch::before {
+  content: ''; position: absolute; left: 4px; top: 6px; width: 52px; height: 32px; border-radius: 16px;
+  background: #555b6a; transition: background 150ms;
 }
 .switch::after {
-  content: ''; position: absolute; top: 2px; left: 2px; width: 28px; height: 28px; border-radius: 50%;
+  content: ''; position: absolute; top: 8px; left: 6px; width: 28px; height: 28px; border-radius: 50%;
   background: #fff; transition: transform 150ms;
 }
-.switch[aria-checked='true'] { background: var(--accent); }
+.switch[aria-checked='true']::before { background: var(--accent); }
 .switch[aria-checked='true']::after { transform: translateX(20px); }
+.switch:focus-visible::before { outline: 2px solid var(--accent-text); outline-offset: 2px; }
 
 .btn-primary {
   min-height: 48px; padding: 0 20px; border-radius: 24px; background: var(--accent); color: #fff; font-weight: 600;
@@ -98,3 +101,4 @@ h1, h2, h3 { margin: 0; font-family: var(--serif); font-weight: 500; }
 .btn-ghost {
   min-height: 48px; padding: 0 20px; border-radius: 24px; border: 1.5px solid var(--rule); color: var(--text);
 }
+:focus-visible { outline: 2px solid var(--accent-text); outline-offset: 2px; }

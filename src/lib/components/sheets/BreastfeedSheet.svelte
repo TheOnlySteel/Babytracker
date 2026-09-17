@@ -5,126 +5,195 @@
   import { closeSheet } from '$lib/data/ui.svelte';
   import { lastOf, runningElapsed } from '$lib/data/derive';
   import { fmtDuration } from '$lib/data/format';
+  import { nonNegative } from '$lib/data/validate';
   import Sheet from '$lib/ui/Sheet.svelte';
   import TimeRow from '$lib/ui/TimeRow.svelte';
   import NoteRow from '$lib/ui/NoteRow.svelte';
 
   let { entry }: { entry?: Entry } = $props();
 
-  // Three modes: editing a finished entry, driving the household's running timer, or a fresh sheet.
-  const editing = untrack(() => (entry && entry.ended_at !== null && (entry.type === 'breastfeed' || entry.type === 'combo') ? entry : undefined));
-  const running = $derived(store.entries.find((e) => e.type === 'breastfeed' && e.ended_at === null && !e.deleted_at));
+  // Two mutually exclusive modes, fixed when the sheet opens:
+  //  - 'edit':  a finished entry was opened. Only that entry is ever written. The household's
+  //             running timer, if any, is irrelevant here.
+  //  - 'timer': fresh sheet, or the running entry itself. Drives the household's one running timer.
+  const opened = untrack(() => entry);
+  const mode: 'edit' | 'timer' = opened && opened.ended_at !== null ? 'edit' : 'timer';
+  const editing = mode === 'edit' ? opened! : undefined;
+  const running = $derived(mode === 'timer' ? store.entries.find((e) => e.type === 'breastfeed' && e.ended_at === null && !e.deleted_at) : undefined);
+
   const p0 = editing?.payload as BreastfeedPayload | undefined;
   const lastFeed = lastOf(store.entries, (e) => e.type === 'breastfeed' && e.ended_at !== null);
   const suggested: Side = (lastFeed?.payload as BreastfeedPayload | undefined)?.end_side === 'left' ? 'right' : 'left';
 
-  let startedAt = $state(editing ? new Date(editing.started_at) : new Date());
+  const startedAt0 = editing ? new Date(editing.started_at) : new Date();
+  let startedAt = $state(new Date(startedAt0));
   let leftMin = $state<number | null>(p0 ? Math.round(p0.left_s / 60) : null);
   let rightMin = $state<number | null>(p0 ? Math.round(p0.right_s / 60) : null);
-  let manual = $state(p0?.manual ?? false);
+  /** Set when the user types a duration. Until then, exact stored timings are preserved on save. */
+  let durationsTouched = $state(false);
   let note = $state(editing?.note ?? '');
   let saving = $state(false);
+  let err = $state('');
   let tick = $state(new Date());
   let timer: ReturnType<typeof setInterval>;
   let wake: { release(): Promise<void> } | null = null;
+  let pending: Promise<unknown> = Promise.resolve();
 
   const elapsed = $derived(running ? runningElapsed(running.payload as BreastfeedPayload, tick) : null);
 
-  onMount(async () => {
-    timer = setInterval(() => (tick = new Date()), 1000);
+  async function acquireWake() {
     try {
       const nav = navigator as Navigator & { wakeLock?: { request(t: 'screen'): Promise<{ release(): Promise<void> }> } };
       wake = (await nav.wakeLock?.request('screen')) ?? null;
     } catch {
       /* unsupported or denied */
     }
+  }
+  function onVisibility() {
+    // iOS releases the wake lock when the app is backgrounded; take it again on return.
+    if (document.visibilityState === 'visible' && mode === 'timer') acquireWake();
+  }
+  onMount(() => {
+    timer = setInterval(() => (tick = new Date()), 1000);
+    if (mode === 'timer') acquireWake();
+    document.addEventListener('visibilitychange', onVisibility);
   });
   onDestroy(() => {
     clearInterval(timer);
+    document.removeEventListener('visibilitychange', onVisibility);
     wake?.release().catch(() => {});
   });
 
-  async function tap(side: Side) {
+  /** Timer transitions are serialised so two quick taps can't race each other. */
+  function tap(side: Side) {
+    pending = pending.then(() => transition(side)).catch(() => {});
+  }
+  async function transition(side: Side) {
     const now = new Date();
-    if (!running) {
+    const cur = running;
+    if (!cur) {
       await store.insert({
         type: 'breastfeed',
         started_at: now,
         ended_at: null,
         payload: { begin_side: side, end_side: null, left_s: 0, right_s: 0, manual: false, segments: [{ side, start: now.toISOString(), end: null }] }
       });
-      manual = false;
       return;
     }
-    const p = running.payload as BreastfeedPayload;
+    const p = cur.payload as BreastfeedPayload;
     const segs = p.segments.map((s) => ({ ...s }));
     const open = segs.find((s) => !s.end);
     if (open) open.end = now.toISOString();
     if (!open || open.side !== side) segs.push({ side, start: now.toISOString(), end: null });
     const e = runningElapsed({ ...p, segments: segs }, now);
-    await store.update(running.id, { payload: { ...p, segments: segs, left_s: e.left_s, right_s: e.right_s } });
+    await store.update(cur.id, { payload: { ...p, segments: segs, left_s: e.left_s, right_s: e.right_s } }, { expectedUpdatedAt: cur.updated_at });
+  }
+
+  function typedDurations(): { left_s: number; right_s: number } | null {
+    const l = nonNegative(leftMin, 'Left');
+    const r = nonNegative(rightMin, 'Right');
+    if (l.error || r.error) {
+      err = l.error ?? r.error ?? '';
+      return null;
+    }
+    const left_s = Math.round((l.value ?? 0) * 60);
+    const right_s = Math.round((r.value ?? 0) * 60);
+    if (left_s + right_s <= 0) {
+      err = 'Enter a duration';
+      return null;
+    }
+    return { left_s, right_s };
   }
 
   async function save() {
+    err = '';
     saving = true;
     try {
-      if (running && !manual) {
-        const now = new Date();
-        const p = running.payload as BreastfeedPayload;
-        const segs = p.segments.map((s) => (s.end ? s : { ...s, end: now.toISOString() }));
-        const e = runningElapsed({ ...p, segments: segs }, now);
-        const last = segs[segs.length - 1];
-        await store.update(
-          running.id,
-          {
-            ended_at: now.toISOString(),
-            payload: { ...p, segments: segs, left_s: e.left_s, right_s: e.right_s, end_side: last?.side ?? p.begin_side, manual: false },
-            note: note || null
-          },
-          { undoLabel: `Logged ${fmtDuration(e.left_s + e.right_s)} breastfeed` }
-        );
-        closeSheet();
-        return;
-      }
-      const left_s = Math.round((leftMin ?? 0) * 60);
-      const right_s = Math.round((rightMin ?? 0) * 60);
-      if (left_s + right_s <= 0) {
-        alert('Enter a duration');
-        return;
-      }
-      const begin_side: Side = left_s > 0 && right_s > 0 ? (p0?.begin_side ?? suggested) : left_s > 0 ? 'left' : 'right';
-      const end_side: Side = left_s > 0 && right_s > 0 ? (p0?.end_side ?? (begin_side === 'left' ? 'right' : 'left')) : begin_side;
-      const payload: BreastfeedPayload = { begin_side, end_side, left_s, right_s, manual: true, segments: [] };
-      const ended = new Date(startedAt.getTime() + (left_s + right_s) * 1000);
-      if (running && manual) {
-        await store.update(running.id, { started_at: startedAt.toISOString(), ended_at: ended.toISOString(), payload, note: note || null }, { undoLabel: 'Logged breastfeed' });
-      } else if (editing) {
-        await store.update(editing.id, { started_at: startedAt.toISOString(), ended_at: ended.toISOString(), payload: { ...(editing.payload as object), ...payload }, note: note || null }, { undoLabel: 'Updated breastfeed' });
-      } else {
-        await store.insert({ type: 'breastfeed', started_at: startedAt, ended_at: ended, payload, note: note || null }, { undoLabel: `Logged ${fmtDuration(left_s + right_s)} breastfeed` });
-      }
+      if (mode === 'edit') await saveEdit();
+      else await saveTimer();
       closeSheet();
+    } catch {
+      /* toasts already explain; keep the sheet open so nothing typed is lost */
     } finally {
       saving = false;
     }
   }
 
+  async function saveEdit() {
+    const e = editing!;
+    const p = e.payload as BreastfeedPayload;
+    if (durationsTouched) {
+      const d = typedDurations();
+      if (!d) throw new Error('invalid');
+      const begin_side: Side = d.left_s > 0 && d.right_s > 0 ? (p.begin_side ?? suggested) : d.left_s > 0 ? 'left' : 'right';
+      const end_side: Side = d.left_s > 0 && d.right_s > 0 ? (p.end_side ?? (begin_side === 'left' ? 'right' : 'left')) : begin_side;
+      // Typing durations is the explicit "convert to manual" action: segments no longer describe the feed.
+      const payload = { ...p, begin_side, end_side, left_s: d.left_s, right_s: d.right_s, manual: true, segments: [] };
+      const ended = new Date(startedAt.getTime() + (d.left_s + d.right_s) * 1000);
+      await store.update(e.id, { started_at: startedAt.toISOString(), ended_at: ended.toISOString(), payload, note: note || null }, { undoLabel: 'Updated breastfeed', expectedUpdatedAt: e.updated_at });
+      return;
+    }
+    // Note or start-time only: keep exact seconds, segments and the original wall-clock length.
+    const patch: { started_at?: string; ended_at?: string | null; note: string | null } = { note: note || null };
+    if (startedAt.getTime() !== startedAt0.getTime()) {
+      const delta = startedAt.getTime() - startedAt0.getTime();
+      patch.started_at = startedAt.toISOString();
+      patch.ended_at = e.ended_at ? new Date(new Date(e.ended_at).getTime() + delta).toISOString() : null;
+      if (p.segments?.length) {
+        const shifted = p.segments.map((s) => ({ ...s, start: new Date(new Date(s.start).getTime() + delta).toISOString(), end: s.end ? new Date(new Date(s.end).getTime() + delta).toISOString() : null }));
+        await store.update(e.id, { ...patch, payload: { ...p, segments: shifted } }, { undoLabel: 'Updated breastfeed', expectedUpdatedAt: e.updated_at });
+        return;
+      }
+    }
+    await store.update(e.id, patch, { undoLabel: 'Updated breastfeed', expectedUpdatedAt: e.updated_at });
+  }
+
+  async function saveTimer() {
+    const cur = running;
+    if (cur && !durationsTouched) {
+      const now = new Date();
+      const p = cur.payload as BreastfeedPayload;
+      const segs = p.segments.map((s) => (s.end ? s : { ...s, end: now.toISOString() }));
+      const el = runningElapsed({ ...p, segments: segs }, now);
+      const last = segs[segs.length - 1];
+      await store.update(
+        cur.id,
+        { ended_at: now.toISOString(), payload: { ...p, segments: segs, left_s: el.left_s, right_s: el.right_s, end_side: last?.side ?? p.begin_side, manual: false }, note: note || null },
+        { undoLabel: `Logged ${fmtDuration(el.left_s + el.right_s)} breastfeed`, expectedUpdatedAt: cur.updated_at }
+      );
+      return;
+    }
+    const d = typedDurations();
+    if (!d) throw new Error('invalid');
+    const begin_side: Side = d.left_s > 0 && d.right_s > 0 ? suggested : d.left_s > 0 ? 'left' : 'right';
+    const end_side: Side = d.left_s > 0 && d.right_s > 0 ? (begin_side === 'left' ? 'right' : 'left') : begin_side;
+    const payload: BreastfeedPayload = { begin_side, end_side, left_s: d.left_s, right_s: d.right_s, manual: true, segments: [] };
+    const ended = new Date(startedAt.getTime() + (d.left_s + d.right_s) * 1000);
+    if (cur) {
+      // Typed over a running timer: the typed values are the record.
+      await store.update(cur.id, { started_at: startedAt.toISOString(), ended_at: ended.toISOString(), payload, note: note || null }, { undoLabel: 'Logged breastfeed', expectedUpdatedAt: cur.updated_at });
+    } else {
+      await store.insert({ type: 'breastfeed', started_at: startedAt, ended_at: ended, payload, note: note || null }, { undoLabel: `Logged ${fmtDuration(d.left_s + d.right_s)} breastfeed` });
+    }
+  }
+
   async function discard() {
-    if (running) await store.remove(running.id, 'Timer discarded');
-    else if (editing) await store.remove(editing.id, 'Breastfeed deleted');
+    if (mode === 'edit') await store.remove(editing!.id, 'Breastfeed deleted', editing!.updated_at);
+    else if (running) await store.remove(running.id, 'Timer discarded', running.updated_at);
     closeSheet();
   }
 
   const numVal = (e: Event) => {
     const v = (e.target as HTMLInputElement).value;
-    manual = true;
+    durationsTouched = true;
+    err = '';
     return v === '' ? null : Number(v);
   };
   const clock = (s: number) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
 </script>
 
 <Sheet title="Breastfeed" color="var(--feed)" dark onsave={save} {saving}>
-  {#if !editing}
+  {#if mode === 'timer'}
     <div class="sides">
       <button class="side" class:on={elapsed?.open === 'left'} class:hint={!running && suggested === 'left'} onclick={() => tap('left')}>
         <span class="name">Left</span>
@@ -144,25 +213,28 @@
     {/if}
   {/if}
 
-  {#if !running || manual}
+  {#if mode === 'edit' || !running || durationsTouched}
     <TimeRow bind:value={startedAt} />
   {/if}
   <label class="row">
     <span class="row-label">Left</span>
-    <span class="amt"><input type="number" inputmode="numeric" placeholder="0" value={leftMin ?? ''} oninput={(e) => (leftMin = numVal(e))} /> min</span>
+    <span class="amt"><input type="number" inputmode="numeric" min="0" placeholder="0" value={leftMin ?? ''} oninput={(e) => (leftMin = numVal(e))} /> min</span>
   </label>
   <label class="row">
     <span class="row-label">Right</span>
-    <span class="amt"><input type="number" inputmode="numeric" placeholder="0" value={rightMin ?? ''} oninput={(e) => (rightMin = numVal(e))} /> min</span>
+    <span class="amt"><input type="number" inputmode="numeric" min="0" placeholder="0" value={rightMin ?? ''} oninput={(e) => (rightMin = numVal(e))} /> min</span>
   </label>
-  {#if running && manual}
+  {#if mode === 'edit' && !durationsTouched && p0 && !p0.manual}
+    <p class="muted hint-text">Timed feed: exact seconds are kept unless you change the minutes.</p>
+  {:else if mode === 'timer' && running && durationsTouched}
     <p class="muted hint-text">Typed durations replace the timer when you save.</p>
   {/if}
+  {#if err}<p class="err" role="alert">{err}</p>{/if}
   <NoteRow bind:value={note} />
 
   {#snippet footer()}
-    {#if running || editing}
-      <button class="btn-ghost danger" onclick={discard}>{running ? 'Discard timer' : 'Delete'}</button>
+    {#if mode === 'edit' || running}
+      <button class="btn-ghost danger" onclick={discard}>{mode === 'edit' ? 'Delete' : 'Discard timer'}</button>
     {/if}
   {/snippet}
 </Sheet>
@@ -170,7 +242,7 @@
 <style>
   .sides { display: flex; gap: 16px; padding: 24px 20px 8px; }
   .side {
-    flex: 1; min-height: 120px; border-radius: 20px; border: 1.5px solid var(--accent); color: var(--text);
+    flex: 1; min-height: 120px; border-radius: 20px; border: 1.5px solid var(--accent-text); color: var(--text);
     display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px;
   }
   .side.hint { background: var(--accent-soft); }
@@ -183,5 +255,6 @@
   .amt { display: inline-flex; align-items: baseline; gap: 6px; }
   .amt input { width: 80px; text-align: right; background: var(--card-2); border: 0; border-radius: 8px; padding: 8px 10px; font-size: 20px; outline: none; }
   .hint-text { margin: 0; padding: 8px 20px; font-size: 14px; }
+  .err { margin: 0; padding: 8px 20px; color: var(--danger); font-size: 15px; }
   .danger { color: var(--danger); border-color: var(--danger); width: 100%; }
 </style>

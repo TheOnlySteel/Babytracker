@@ -1,5 +1,6 @@
 import type { BottlePayload, BreastfeedPayload, DiaperPayload, Entry, PumpPayload } from './types';
 import { isFeed } from './types';
+import { runningElapsed } from './derive';
 
 export interface Summary {
   breastfeed: { count: number; total_s: number; left_s: number; right_s: number };
@@ -45,8 +46,15 @@ export function summarize(entries: Entry[], from: Date, to: Date, birthDate?: st
       case 'combo': {
         const p = e.payload as BreastfeedPayload;
         s.breastfeed.count++;
-        s.breastfeed.left_s += p.left_s ?? 0;
-        s.breastfeed.right_s += p.right_s ?? 0;
+        if (e.ended_at === null && p.segments?.length) {
+          // Running timer: count what has elapsed so far, so Summary agrees with the clock.
+          const el = runningElapsed(p, to);
+          s.breastfeed.left_s += el.left_s;
+          s.breastfeed.right_s += el.right_s;
+        } else {
+          s.breastfeed.left_s += p.left_s ?? 0;
+          s.breastfeed.right_s += p.right_s ?? 0;
+        }
         if (e.type === 'combo') {
           const b = e.payload as BottlePayload;
           if ((b.breast_milk_ml ?? 0) + (b.formula_ml ?? 0) > 0) {
@@ -89,6 +97,11 @@ export function summarize(entries: Entry[], from: Date, to: Date, birthDate?: st
   s.bottle.total_ml = s.bottle.breast_milk_ml + s.bottle.formula_ml;
   s.pump.total_ml = s.pump.left_ml + s.pump.right_ml;
   return s;
+}
+
+/** Number of feeding sessions (breastfeed, bottle or combo), each counted once. */
+export function feedSessions(entries: Entry[]): number {
+  return entries.filter((e) => !e.deleted_at && isFeed(e.type)).length;
 }
 
 /** Entries of a card family (feed = breastfeed+bottle+combo), newest first. */

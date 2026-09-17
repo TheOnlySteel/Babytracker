@@ -1,5 +1,5 @@
 -- Run AFTER 0001_init.sql and AFTER both users exist under Authentication → Users.
--- Edit the two emails, then run in the SQL editor. Safe to re-run: skips what already exists.
+-- Replace both placeholder emails, then run in the SQL editor. Safe to re-run: skips what already exists.
 
 do $$
 declare
@@ -7,7 +7,7 @@ declare
   steel uuid;
   dom uuid;
 begin
-  select id into steel from auth.users where email = 'steel640@hotmail.com';
+  select id into steel from auth.users where email = 'STEEL_EMAIL_HERE';
   select id into dom   from auth.users where email = 'DOMINIQUE_EMAIL_HERE';
   if steel is null or dom is null then
     raise exception 'Create both users under Authentication → Users first (found steel=%, dominique=%)', steel, dom;
