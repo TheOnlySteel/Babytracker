@@ -44,24 +44,24 @@ export function entryLabel(e: Entry): string {
 }
 
 /** Numeric magnitude used for the proportional bar, and its display string. */
-export function entryMagnitude(e: Entry): { value: number; text: string } | null {
+export function entryMagnitude(e: Entry): { value: number; text: string; unit: 'ml' | 's' } | null {
   switch (e.type) {
     case 'bottle': {
       const ml = bottleTotalMl(e.payload as BottlePayload);
-      return { value: ml, text: `${ml} mL` };
+      return { value: ml, text: `${ml} mL`, unit: 'ml' };
     }
     case 'breastfeed': {
       const s = breastfeedTotalS(e.payload as BreastfeedPayload);
-      return { value: s, text: fmtDuration(s) };
+      return { value: s, text: fmtDuration(s), unit: 's' };
     }
     case 'combo': {
       const s = breastfeedTotalS(e.payload as BreastfeedPayload);
       const ml = bottleTotalMl(e.payload as BottlePayload);
-      return { value: s, text: ml ? `${fmtDuration(s)} + ${ml} mL` : fmtDuration(s) };
+      return { value: s, text: ml ? `${fmtDuration(s)} + ${ml} mL` : fmtDuration(s), unit: 's' };
     }
     case 'pump': {
       const ml = pumpTotalMl(e.payload as PumpPayload);
-      return { value: ml, text: `${ml} mL` };
+      return { value: ml, text: `${ml} mL`, unit: 'ml' };
     }
     default:
       return null;

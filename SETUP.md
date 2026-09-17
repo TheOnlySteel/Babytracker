@@ -12,7 +12,7 @@ One-time steps to get the tracker live. About 30 minutes. The app is useless unt
 
 ## 2. Schema
 
-**SQL Editor → New query**, paste the whole of `supabase/migrations/0001_init.sql`, **Run**. It creates the tables, row-level security, the one-running-timer indexes, and adds `entries` to the realtime publication.
+**SQL Editor → New query**, then run every file in `supabase/migrations/` in order (`0001_init.sql`, `0002_harden_functions.sql`, `0003_integrity.sql`), one query each. Together they create the tables, row-level security, the one-running-timer indexes, the realtime publication, the advisor hardening, and the integrity checks (no negative quantities, no end before start, no cross-household references, no forged attribution). Note which you have applied; there is no migration table on a dashboard-managed project.
 
 ## 3. Auth: two accounts with passwords, no open signup
 
@@ -28,7 +28,7 @@ Forgotten password later: **Authentication → Users → ⋯ → Send password r
 
 ## 4. Household seed
 
-Open `supabase/seed.sql`, replace `DOMINIQUE_EMAIL_HERE` with her email (yours is already in), paste into the SQL Editor, **Run**. It creates the household, Rosalie, both caregiver rows, and the default formula brands. The final `select` shows what it made.
+Open `supabase/seed.sql`, replace both placeholder emails, paste into the SQL Editor, **Run**. It creates the household, Rosalie, both caregiver rows, and the default formula brands. The final `select` shows what it made.
 
 ## 5. Netlify
 
@@ -48,7 +48,7 @@ npm install
 npm run import:nara -- path/to/export_narababy_rosalie_YYYYMMDD.csv
 ```
 
-Add `--dry-run` first to see the mapping without writing. The script upserts on Nara's `_activityKey`, so re-running with a newer export adds the new rows and leaves the rest untouched. Re-run it once more right before you stop logging in Nara.
+Add `--dry-run` first to see the mapping without writing. By default the script only inserts rows whose Nara key is new; rows already in the database are left exactly as they are, so anything you edited in the app survives a re-import. Pass `--overwrite` if Nara should win (for example if you fixed a row in Nara rather than here). Any row it can't map cleanly is listed and nothing is written. Re-run it once more right before you stop logging in Nara.
 
 The unit tests reproduce the spec's acceptance numbers against the real export when it sits in `data/` (gitignored):
 
@@ -63,5 +63,6 @@ Safari → share sheet → **Add to Home Screen**. The icon launches full-screen
 ## Later
 
 - **Realtime** is on by default for `entries` and `household_prefs`; nothing to enable in the dashboard.
-- **Backups**: the free tier has no point-in-time recovery. Export a CSV from the Table Editor now and then if you care.
+- **Backups**: the free tier has no point-in-time recovery. **Account → Export everything** downloads all entries as JSON and CSV; do it now and then. To restore into a fresh project, run the migrations and seed, then load the JSON with a short script or ask for one.
+- **Repository visibility**: the repo is public. The spec and this file name the family; the seed no longer carries an email and the reference screenshots were removed from the current tree, but both remain in Git history. Making the repository private on GitHub (Settings → General → Danger Zone) is the one-click way to close that.
 - **Soft deletes** live in `entries.deleted_at`. Nothing purges them yet; 800 rows a month is nothing.

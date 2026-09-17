@@ -71,12 +71,28 @@ describe('mapRow', () => {
   });
 });
 
-// Acceptance test from spec §4 against the real export (gitignored; skipped when absent).
+describe('mapRow validation', () => {
+  it('rejects a row with no activity key', () => {
+    expect(() => mapRow({ ...base, _activityKey: '', Type: 'Diaper', '[Diaper] Type': 'Wet' }, ctx)).toThrow(/activity key/);
+  });
+  it('rejects a non-numeric volume instead of storing NaN', () => {
+    expect(() => mapRow({ ...base, Type: 'Bottle Feed', '[Bottle Feed] Type': 'Formula', '[Bottle Feed] Formula Volume': 'lots', '[Bottle Feed] Formula Volume Unit': 'ML' }, ctx)).toThrow(/not a number/);
+  });
+  it('rejects a mixed bottle with only a generic total', () => {
+    expect(() => mapRow({ ...base, Type: 'Bottle Feed', '[Bottle Feed] Type': 'Breast Milk Formula', '[Bottle Feed] Volume': '60', '[Bottle Feed] Volume Unit': 'ML' }, ctx)).toThrow(/split/);
+  });
+});
+
+// Acceptance test from spec §4 against the real export (gitignored). The whole block is
+// conditional so a clean checkout never touches the file during collection.
 const EXPORT = new URL('../data/export_narababy_rosalie_20260916.csv', import.meta.url);
-describe.skipIf(!existsSync(EXPORT))('real export acceptance (spec §4)', () => {
-  const csv = readFileSync(EXPORT, 'utf8').replace(/^﻿/, '');
+const realExport = () => {
+  const csv = readFileSync(EXPORT, 'utf8').replace(/^\uFEFF/, '');
   const { data: rows } = Papa.parse(csv, { header: true, skipEmptyLines: true });
-  const entries = rows.map((r) => mapRow(r, ctx)).filter(Boolean).map((e, i) => ({ ...e, id: String(i), created_at: '', updated_at: '', deleted_at: null }));
+  return rows.map((r) => mapRow(r, ctx)).filter(Boolean).map((e, i) => ({ ...e, id: String(i), created_at: '', updated_at: '', deleted_at: null }));
+};
+describe.skipIf(!existsSync(EXPORT))('real export acceptance (spec §4)', () => {
+  const entries = existsSync(EXPORT) ? realExport() : [];
 
   it('maps every in-scope row', () => {
     const counts = entries.reduce((a, e) => ((a[e.type] = (a[e.type] ?? 0) + 1), a), {});

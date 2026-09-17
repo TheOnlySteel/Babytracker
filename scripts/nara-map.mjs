@@ -13,8 +13,13 @@ const TYPE_MAP = {
 const TEXTURE_MAP = { RUN: 'runny', MUCOUS: 'mucousy', MUSH: 'mushy', SOLID: 'solid', PEBBLE: 'pebbles' };
 const COLORS = new Set(['black', 'green', 'yellow', 'brown', 'red', 'gray']);
 
-const num = (v) => (v === undefined || v === null || v === '' ? null : Number(v));
-const int = (v) => (v === undefined || v === null || v === '' ? 0 : Math.round(Number(v)));
+const num = (v, what = 'value') => {
+  if (v === undefined || v === null || v === '') return null;
+  const n = Number(v);
+  if (!Number.isFinite(n)) throw new Error(`${what} is not a number: ${JSON.stringify(v)}`);
+  return n;
+};
+const int = (v, what = 'value') => Math.round(num(v, what) ?? 0);
 
 function assertUnit(row, col, expected) {
   const u = row[col];
@@ -51,9 +56,14 @@ function bottlePayload(row, prefix) {
   let breast_milk_ml = num(row[`[${prefix}] Breast Milk Volume`]);
   let formula_ml = num(row[`[${prefix}] Formula Volume`]);
   const plain = num(row[`[${prefix}] Volume`]);
-  // Defensive: if only the generic Volume column is filled, attribute it to the single kind.
-  if (plain != null && breast_milk_ml == null && formula_ml == null && kinds.length === 1) {
-    if (kinds[0] === 'formula') formula_ml = plain; else breast_milk_ml = plain;
+  // If only the generic Volume column is filled, attribute it to the single kind.
+  if (plain != null && breast_milk_ml == null && formula_ml == null) {
+    if (kinds.length === 1) {
+      if (kinds[0] === 'formula') formula_ml = plain; else breast_milk_ml = plain;
+    } else {
+      // A mixed bottle with no split cannot be attributed faithfully; surface it rather than lose it.
+      throw new Error(`Mixed bottle ${row._activityKey} has a total but no breast milk / formula split; enter it by hand`);
+    }
   }
   const payload = { kinds };
   if (breast_milk_ml != null) payload.breast_milk_ml = breast_milk_ml;
@@ -133,6 +143,7 @@ function growthPayload(row) {
 export function mapRow(row, ctx) {
   const type = TYPE_MAP[row.Type];
   if (!type) return null;
+  if (!row._activityKey) throw new Error(`Row of type ${row.Type} has no activity key`);
   const epoch = row['Start Date/time (Epoch)'];
   if (!epoch) throw new Error(`Missing start epoch for ${row._activityKey}`);
   const started = new Date(Number(epoch));

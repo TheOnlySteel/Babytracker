@@ -6,7 +6,7 @@
 </script>
 
 <header class="hdr">
-  <div class="avatar" aria-hidden="true">{store.child?.name?.[0] ?? '·'}</div>
+  <div class="avatar" aria-hidden="true">{store.child?.name?.[0] ?? '·'}<span class="rt {store.realtime}" title="sync: {store.realtime}"></span></div>
   <div class="who">
     <h1>{store.child?.name ?? 'Baby'}</h1>
     <div class="muted sub">{fmtHeaderDate(store.now)}{#if store.child}<span class="sep">·</span>{fmtAge(store.child.birth_date, store.now)}{/if}</div>
@@ -27,6 +27,10 @@
     background: linear-gradient(135deg, var(--feed), var(--pump)); color: var(--ink);
     display: grid; place-items: center; font-family: var(--serif); font-size: 32px;
   }
+  .avatar { position: relative; }
+  .rt { position: absolute; right: 2px; bottom: 2px; width: 12px; height: 12px; border-radius: 50%; border: 2px solid var(--bg); background: #888; }
+  .rt.live { background: #5fbf7a; }
+  .rt.offline { background: var(--danger); }
   .who { flex: 1; min-width: 0; }
   h1 { font-size: 40px; line-height: 1.05; }
   .sub { white-space: nowrap; font-size: 16px; }

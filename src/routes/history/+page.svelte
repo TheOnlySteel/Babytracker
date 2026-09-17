@@ -3,7 +3,7 @@
   import Header from '$lib/components/Header.svelte';
   import LogRow from '$lib/components/LogRow.svelte';
   import { store } from '$lib/data/store.svelte';
-  import { groupByDay, summarize } from '$lib/data/summary';
+  import { groupByDay, summarize, feedSessions } from '$lib/data/summary';
   import { fmtDayLabel, fmtDuration } from '$lib/data/format';
   import { openSheet, type SheetKind } from '$lib/data/ui.svelte';
   import type { Entry } from '$lib/data/types';
@@ -11,7 +11,7 @@
   const days = $derived(groupByDay(store.entries.filter((e) => e.type !== 'growth')));
   let open = $state<Set<string>>(new Set());
   let loading = $state(false);
-  let exhausted = $state(false);
+  let initialised = false;
 
   function toggle(day: string) {
     const next = new Set(open);
@@ -29,13 +29,17 @@
   }
   async function older() {
     loading = true;
-    const oldest = store.entries.reduce((a, e) => (e.started_at < a ? e.started_at : a), new Date().toISOString());
-    const n = await store.loadOlder(oldest, 30);
-    if (n === 0) exhausted = true;
+    // Pages by date window from the store's cursor, so an empty month is skipped rather than
+    // mistaken for the end of history; the store marks exhausted once it passes the birth date.
+    await store.loadOlder(30);
     loading = false;
   }
   $effect(() => {
-    if (days.length && open.size === 0) open = new Set([days[0].day]);
+    // Open the newest day once on first render; after that the user's collapses stick.
+    if (!initialised && days.length) {
+      initialised = true;
+      open = new Set([days[0].day]);
+    }
   });
 </script>
 
@@ -50,7 +54,7 @@
         <div>
           <div class="serif lbl">{fmtDayLabel(day, store.now)}</div>
           <div class="muted stats">
-            {s.breastfeed.count + s.bottle.count} feeds · {fmtDuration(s.breastfeed.total_s)} · {s.bottle.total_ml} mL · {s.diaper.count} diapers{#if s.pump.count}&nbsp;· {s.pump.total_ml} mL pumped{/if}
+            {feedSessions(entries)} feeds · {fmtDuration(s.breastfeed.total_s)} · {s.bottle.total_ml} mL · {s.diaper.count} diapers{#if s.pump.count}&nbsp;· {s.pump.total_ml} mL pumped{/if}
           </div>
         </div>
         {#if isOpen}<ChevronUp size={22} />{:else}<ChevronDown size={22} />{/if}
@@ -64,8 +68,10 @@
   {:else}
     <p class="muted empty">Nothing logged yet.</p>
   {/each}
-  {#if !exhausted}
-    <button class="btn-ghost more" onclick={older} disabled={loading}>{loading ? 'Loading…' : 'Load older'}</button>
+  {#if !store.exhausted}
+    <button class="btn-ghost more" onclick={older} disabled={loading}>{loading ? 'Loading…' : `Load older (before ${new Date(store.loadedSince).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })})`}</button>
+  {:else}
+    <p class="muted more">That's everything since birth.</p>
   {/if}
 </main>
 

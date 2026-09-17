@@ -39,7 +39,15 @@
     const k = dayKey(new Date(e.started_at));
     return k === todayKey || k === ydKey;
   }));
-  const max = $derived(Math.max(0, ...recent.map((e) => entryMagnitude(e)?.value ?? 0)));
+  // Bars are scaled per unit: bottles against the biggest bottle, breastfeeds against the longest feed.
+  const max = $derived.by(() => {
+    const m = { ml: 0, s: 0 };
+    for (const e of recent) {
+      const g = entryMagnitude(e);
+      if (g && g.value > m[g.unit]) m[g.unit] = g.value;
+    }
+    return m;
+  });
   const head = $derived(last ? headline(last) : null);
 
   function editSheet(e: Entry): SheetKind {
