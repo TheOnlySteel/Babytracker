@@ -9,3 +9,7 @@ node_modules
 *.log
 .DS_Store
 vite.config.ts.timestamp-*
+
+# Firmware secrets (Wi-Fi, device key, Cradlewise token). Only the *.example.h files are tracked.
+secrets.h
+**/secrets.h
