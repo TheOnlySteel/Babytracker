@@ -7,6 +7,7 @@
 #include "supabase_certs.h"
 #include <ArduinoJson.h>
 #include <HTTPClient.h>
+#include <FastLED.h>
 #include <M5Unified.h>
 #include <Preferences.h>
 #include <WiFi.h>
@@ -25,6 +26,7 @@ long sourceAge() {
                                          : 1000000;
 }
 #include "dashboard.h"
+#include "m5go_leds.h"
 
 Screen screen = HUB;
 QueueHandle_t commands, results;
@@ -441,9 +443,12 @@ PadButton buttons[24];
 int buttonCount = 0;
 bool reviewing = false;
 void button(int x, int y, int w, int h, const String &label, int action, bool enabled = true) {
-  canvas.fillRoundRect(x, y, w, h, 8, enabled ? COL_PANEL : COL_DARK);
-  canvas.drawRoundRect(x, y, w, h, 8, enabled ? COL_DIM : COL_FAINT);
-  canvas.setFont(&fonts::FreeSans9pt7b);
+  pixelPanel(x, y, w, h, enabled ? COL_PANEL : COL_DARK,
+             enabled ? COL_AMBER : COL_FAINT, COL_BLACK);
+  canvas.setFont(&fonts::Font0);
+  canvas.setTextSize(2); // 12 px per glyph; drop to 6 px when the label would spill the panel
+  if (canvas.textWidth(label) > w - 8)
+    canvas.setTextSize(1);
   canvas.setTextDatum(middle_center);
   canvas.setTextColor(enabled ? COL_WHITE : COL_FAINT);
   canvas.drawString(label, x + w / 2, y + h / 2);
@@ -451,7 +456,10 @@ void button(int x, int y, int w, int h, const String &label, int action, bool en
     buttons[buttonCount++] = {x, y, w, h, action, enabled};
 }
 void line(const String &text, int y, uint16_t color = COL_WHITE) {
-  canvas.setFont(&fonts::FreeSans9pt7b);
+  canvas.setFont(&fonts::Font0);
+  canvas.setTextSize(2);
+  if (canvas.textWidth(text) > 312) // full-width line; 27+ glyphs no longer fit at 12 px
+    canvas.setTextSize(1);
   canvas.setTextDatum(middle_center);
   canvas.setTextColor(color);
   canvas.drawString(text, 160, y);
@@ -785,16 +793,29 @@ void touchRelease(int x, int y, uint32_t held) {
     return;
   }
   if (screen == DASHBOARD) {
-    if (held >= 600) {
+    int swipe = x - touchX;
+    if (abs(swipe) > 70) {
+      int next = ((int)page + (swipe < 0 ? 1 : 2)) % 3;
+      page = (Page)next;
+      prefs.putString("boot", page == PAGE_LAMP ? "lamp" : "dashboard");
+      buzz(12, 70);
+    } else if (held >= 600) { // hold anywhere toggles lamp mode, corner included
       page = page == PAGE_LAMP ? PAGE_STATUS : PAGE_LAMP;
       prefs.putString("boot", page == PAGE_LAMP ? "lamp" : "dashboard");
+    } else if (page == PAGE_LAMP) {
+      lampPeekUntil = millis() + 7000;
     } else if (BOX_MUTE.hit(x, y)) {
       volIdx = (volIdx + 1) % 4;
       prefs.putInt("vol", volIdx);
       if (isMuted())
         stopSong();
-    } else
+      else
+        playSong(SONG_SARIA); // audible confirmation at the new level
+    } else if (page == PAGE_STATUS && BOX_WORD.hit(x, y)) {
+      playSong(songForStatus(curStatus));
+    } else {
       navigate(HUB);
+    }
     nextDrawMs = 0;
     return;
   }
@@ -826,6 +847,7 @@ void setup() {
   canvas.setPsram(true);
   canvas.createSprite(320, 240);
   loadOutbox();
+  setupM5GoLeds();
   String boot = prefs.getString("boot", "hub");
   if (boot != "hub") {
     screen = DASHBOARD;
@@ -845,6 +867,8 @@ void loop() {
   M5.update();
   serviceVibe();
   serviceSong();
+  serviceM5GoLeds(displayState(), pending || queued || timerPending.length(), failed,
+                  WiFi.status() == WL_CONNECTED, inNightWindow());
   NetResult result;
   while (xQueueReceive(results, &result, 0) == pdTRUE)
     consume(result);
@@ -877,7 +901,7 @@ void loop() {
     touchY = t.y;
   }
   if (t.wasReleased())
-    touchRelease(touchX, touchY, millis() - touchAt);
+    touchRelease(t.x, t.y, millis() - touchAt);
   if (M5.BtnA.wasPressed() || M5.BtnB.wasPressed()) {
     if (nightDimActive)
       nightWakeUntil = millis() + 15000;
@@ -909,6 +933,8 @@ void loop() {
       drawPad();
     else if (page == PAGE_LAMP)
       drawLampScreen();
+    else if (page == PAGE_STATS)
+      drawStatsScreen();
     else if (nightDimActive)
       drawNightScreen();
     else
