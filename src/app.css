@@ -112,3 +112,5 @@ h1, h2, h3 { margin: 0; font-family: var(--serif); font-weight: 500; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; }
 }
+
+:root { --sleep: #c9b8e8; --sleep-badge: #c9b8e8; }

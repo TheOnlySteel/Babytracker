@@ -12,8 +12,8 @@
   const mag = $derived(entryMagnitude(entry));
   const pct = $derived(mag && max[mag.unit] > 0 ? Math.max(4, Math.round((mag.value / max[mag.unit]) * 100)) : 0);
   const isYesterday = $derived(showDay && dayKey(new Date(entry.started_at)) === dayKey(new Date(store.now.getTime() - 86400_000)));
-  const running = $derived(entry.ended_at === null && (entry.type === 'breastfeed' || entry.type === 'pump'));
-  const barColor = $derived(color ?? (entry.type === 'diaper' ? 'var(--diaper)' : entry.type === 'pump' ? 'var(--pump)' : 'var(--feed)'));
+  const running = $derived(entry.ended_at === null && (entry.type === 'breastfeed' || entry.type === 'pump' || entry.type === 'sleep'));
+  const barColor = $derived(color ?? (entry.type === 'sleep' ? 'var(--sleep)' : entry.type === 'diaper' ? 'var(--diaper)' : entry.type === 'pump' ? 'var(--pump)' : 'var(--feed)'));
 </script>
 
 <button class="logrow" {onclick} disabled={!onclick}>

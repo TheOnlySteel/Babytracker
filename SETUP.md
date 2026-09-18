@@ -2,6 +2,8 @@
 
 One-time steps to get the tracker live. About 30 minutes. The app is useless until step 3 is done, so do these in order.
 
+These are the steps for a **new BabyTracker backend**. If BabyTracker already signs in and saves logs against Supabase, reuse that project and household; do not recreate them. To add the new Cradlewise connection, follow [the rollout guide](docs/rollout.md). A tested implementation does not mean its cloud services have been configured or deployed.
+
 ## 1. Supabase project
 
 1. https://supabase.com/dashboard → **New project**. Region: **West US (Oregon)** (closest to Vancouver). Save the database password somewhere; you won't need it day to day.
@@ -12,7 +14,9 @@ One-time steps to get the tracker live. About 30 minutes. The app is useless unt
 
 ## 2. Schema
 
-**SQL Editor → New query**, then run every file in `supabase/migrations/` in order (`0001_init.sql`, `0002_harden_functions.sql`, `0003_integrity.sql`), one query each. Together they create the tables, row-level security, the one-running-timer indexes, the realtime publication, the advisor hardening, and the integrity checks (no negative quantities, no end before start, no cross-household references, no forged attribution). Note which you have applied; there is no migration table on a dashboard-managed project.
+For the repository's existing dashboard-managed workflow, use **SQL Editor → New query**, then run every file in `supabase/migrations/` in order: `0001_init.sql`, `0002_harden_functions.sql`, `0003_integrity.sql`, `0004_sleep_enum.sql`, `0005_sleep.sql`, and `0006_devices.sql`. Run **one file per committed query**; 0004 must commit before 0005 references the new enum value. Together they create the original tracker schema and the sleep/device integration. Note which files you have applied; dashboard SQL does not register them in CLI migration history. If the project is already managed through CLI migrations, keep that workflow and reconcile the applied history before deploying; do not blindly rerun files or mix deployment methods. See [Supabase's migration guidance](https://supabase.com/docs/guides/deployment/database-migrations).
+
+Applying the schema does not connect Cradlewise. Its token, Edge Function, scheduler, timezone and device pairing are separate steps in the integration handoff. Automatic sleep derivation starts off.
 
 ## 3. Auth: two accounts with passwords, no open signup
 

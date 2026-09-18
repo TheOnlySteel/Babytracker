@@ -5,6 +5,7 @@
   import DiaperSheet from './sheets/DiaperSheet.svelte';
   import BreastfeedSheet from './sheets/BreastfeedSheet.svelte';
   import PumpSheet from './sheets/PumpSheet.svelte';
+  import SleepSheet from './sheets/SleepSheet.svelte';
   import SummarySheet from './sheets/SummarySheet.svelte';
 </script>
 
@@ -15,6 +16,7 @@
     {:else if ui.sheet.kind === 'diaper'}<DiaperSheet entry={ui.sheet.entry} />
     {:else if ui.sheet.kind === 'breastfeed'}<BreastfeedSheet entry={ui.sheet.entry} />
     {:else if ui.sheet.kind === 'pump'}<PumpSheet entry={ui.sheet.entry} />
+    {:else if ui.sheet.kind === 'sleep'}<SleepSheet entry={ui.sheet.entry} />
     {:else if ui.sheet.kind === 'summary'}<SummarySheet />
     {/if}
   {/key}

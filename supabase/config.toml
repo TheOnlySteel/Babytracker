@@ -1,0 +1,2 @@
+[functions.cradlewise-poll]
+verify_jwt = false

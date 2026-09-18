@@ -1,7 +1,19 @@
 import type { Entry } from './types';
+import { editorFor } from './derive';
+import { toast } from './toast.svelte';
 
-export type SheetKind = 'feed-picker' | 'bottle' | 'breastfeed' | 'diaper' | 'pump' | 'summary';
-export interface SheetState { kind: SheetKind; entry?: Entry }
+export type SheetKind =
+  | 'feed-picker'
+  | 'bottle'
+  | 'breastfeed'
+  | 'diaper'
+  | 'pump'
+  | 'summary'
+  | 'sleep';
+export interface SheetState {
+  kind: SheetKind;
+  entry?: Entry;
+}
 
 export const ui = $state<{ sheet: SheetState | null }>({ sheet: null });
 
@@ -10,7 +22,8 @@ export const ui = $state<{ sheet: SheetState | null }>({ sheet: null });
 let opener: Element | null = null;
 
 export function openSheet(kind: SheetKind, entry?: Entry) {
-  if (!ui.sheet && typeof document !== 'undefined') opener = document.activeElement;
+  if (!ui.sheet && typeof document !== 'undefined')
+    opener = document.activeElement;
   ui.sheet = { kind, entry };
 }
 
@@ -22,4 +35,10 @@ export function closeSheet() {
     // After the modal unmounts, so the inert attribute is already gone.
     setTimeout(() => o.focus({ preventScroll: true }), 0);
   }
+}
+
+export function openEntry(entry: Entry) {
+  const kind = editorFor(entry.type);
+  if (kind) openSheet(kind, entry);
+  else toast('Update the app to edit this entry');
 }

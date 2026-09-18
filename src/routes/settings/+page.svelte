@@ -1,4 +1,5 @@
 <script lang="ts">
+  import MonitorSettings from '$lib/components/MonitorSettings.svelte';
   import { store } from '$lib/data/store.svelte';
   import { toast } from '$lib/data/toast.svelte';
   import type { Entry } from '$lib/data/types';
@@ -24,8 +25,8 @@
   };
 
   function toCsv(rows: Entry[]): string {
-    const cols = ['id', 'type', 'started_at', 'ended_at', 'note', 'created_by', 'updated_by', 'created_at', 'updated_at', 'deleted_at', 'nara_activity_key'] as const;
-    const payloadKeys = ['left_s', 'right_s', 'begin_side', 'end_side', 'manual', 'kinds', 'breast_milk_ml', 'formula_ml', 'formula_brand', 'wet', 'dirty', 'dry', 'texture', 'color', 'blowout', 'rash', 'left_ml', 'right_ml', 'weight_kg', 'height_cm', 'head_cm'];
+    const cols = ['id', 'type', 'started_at', 'ended_at', 'note', 'created_by', 'updated_by', 'created_at', 'updated_at', 'deleted_at', 'nara_activity_key', 'source_key', 'via'] as const;
+    const payloadKeys = ['left_s', 'right_s', 'begin_side', 'end_side', 'manual', 'kinds', 'breast_milk_ml', 'formula_ml', 'formula_brand', 'wet', 'dirty', 'dry', 'texture', 'color', 'blowout', 'rash', 'left_ml', 'right_ml', 'weight_kg', 'height_cm', 'head_cm', 'total_ml', 'kind', 'source', 'place', 'night_key', 'timing_locked', 'provisional', 'uncertain_end'];
     const who = (id: string | null) => store.caregivers.find((c) => c.user_id === id)?.display_name ?? id ?? '';
     const head = [...cols, ...payloadKeys].join(',');
     const lines = rows.map((r) => {
@@ -75,6 +76,7 @@
     </div>
   </div>
 
+  <MonitorSettings/>
   <div class="card">
     <div class="row col">
       <span class="row-label">Recently deleted</span>
