@@ -53,6 +53,6 @@ jobs:
       - uses: denoland/setup-deno@v2
         with:
           deno-version: v2.x
-      # The repo has a package.json, so Deno 2 would otherwise look for node_modules; the Edge
-      # runtime resolves npm: specifiers itself.
-      - run: deno check --node-modules-dir=none supabase/functions/cradlewise-poll/index.ts
+      # The functions folder has its own deno.json; without it Deno reads the SvelteKit
+      # tsconfig and package.json at the repo root and rejects the npm: import.
+      - run: deno check --config supabase/functions/deno.json supabase/functions/cradlewise-poll/index.ts
