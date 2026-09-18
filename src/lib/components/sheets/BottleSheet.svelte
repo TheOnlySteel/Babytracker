@@ -63,7 +63,8 @@
 
   async function save() {
     err = '';
-    const payload: BottlePayload = { kinds: [...kinds] };
+    const payload: BottlePayload = { ...(editing?.payload as BottlePayload), kinds: [...kinds] };
+    delete payload.breast_milk_ml; delete payload.formula_ml; delete payload.formula_brand;
     if (both) {
       const b = nonNegative(breastMl, 'Breast milk', { max: 1000 });
       const f = nonNegative(formulaMl, 'Formula', { max: 1000 });

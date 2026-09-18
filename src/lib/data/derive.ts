@@ -1,5 +1,13 @@
 // Small pure helpers for describing entries in the UI.
-import type { BottlePayload, BreastfeedPayload, DiaperPayload, Entry, PumpPayload, GrowthPayload } from './types';
+import type {
+  BottlePayload,
+  BreastfeedPayload,
+  DiaperPayload,
+  Entry,
+  PumpPayload,
+  GrowthPayload,
+  SleepPayload,
+} from './types';
 import { bottleTotalMl, breastfeedTotalS, pumpTotalMl } from './types';
 import { fmtDuration, fmtKg } from './format';
 
@@ -18,33 +26,74 @@ export function entryLabel(e: Entry): string {
       return bottleKindLabel(e.payload as BottlePayload);
     case 'breastfeed': {
       const p = e.payload as BreastfeedPayload;
-      const sides = [p.left_s >= 30 && 'Left', p.right_s >= 30 && 'Right'].filter(Boolean);
+      const sides = [
+        p.left_s >= 30 && 'Left',
+        p.right_s >= 30 && 'Right',
+      ].filter(Boolean);
       return sides.join(' · ') || 'Breastfeed';
     }
     case 'combo':
       return 'Combo';
     case 'diaper': {
       const p = e.payload as DiaperPayload;
-      const kind = p.wet && p.dirty ? 'Wet + dirty' : p.dirty ? 'Dirty' : p.wet ? 'Wet' : 'Dry';
+      const kind =
+        p.wet && p.dirty
+          ? 'Wet + dirty'
+          : p.dirty
+            ? 'Dirty'
+            : p.wet
+              ? 'Wet'
+              : 'Dry';
       const detail = [...(p.texture ?? []), ...(p.color ?? [])];
-      const flags = [p.blowout && 'blowout', p.rash && 'rash'].filter(Boolean) as string[];
+      const flags = [p.blowout && 'blowout', p.rash && 'rash'].filter(
+        Boolean,
+      ) as string[];
       const extra = [...detail, ...flags].join(', ');
       return extra ? `${kind} · ${extra}` : kind;
     }
     case 'pump': {
       const p = e.payload as PumpPayload;
-      const parts = [p.left_ml != null && `${p.left_ml} L`, p.right_ml != null && `${p.right_ml} R`].filter(Boolean);
+      if (p.total_ml != null) return `${p.total_ml} mL total`;
+      const parts = [
+        p.left_ml != null && `${p.left_ml} L`,
+        p.right_ml != null && `${p.right_ml} R`,
+      ].filter(Boolean);
       return parts.join(' · ') || 'Pump';
+    }
+    case 'sleep': {
+      const p = e.payload as SleepPayload;
+      return [
+        p.kind === 'night' ? 'Night sleep' : 'Nap',
+        p.place,
+        p.source === 'cradlewise'
+          ? p.timing_locked
+            ? 'Cradlewise, adjusted'
+            : 'auto'
+          : null,
+        p.provisional ? 'provisional' : null,
+      ]
+        .filter(Boolean)
+        .join(' · ');
     }
     case 'growth': {
       const p = e.payload as GrowthPayload;
-      return [p.weight_kg != null && fmtKg(p.weight_kg), p.height_cm != null && `${p.height_cm} cm`, p.head_cm != null && `head ${p.head_cm} cm`].filter(Boolean).join(' · ');
+      return [
+        p.weight_kg != null && fmtKg(p.weight_kg),
+        p.height_cm != null && `${p.height_cm} cm`,
+        p.head_cm != null && `head ${p.head_cm} cm`,
+      ]
+        .filter(Boolean)
+        .join(' · ');
     }
+    default:
+      return 'Unknown entry';
   }
 }
 
 /** Numeric magnitude used for the proportional bar, and its display string. */
-export function entryMagnitude(e: Entry): { value: number; text: string; unit: 'ml' | 's' } | null {
+export function entryMagnitude(
+  e: Entry,
+): { value: number; text: string; unit: 'ml' | 's' } | null {
   switch (e.type) {
     case 'bottle': {
       const ml = bottleTotalMl(e.payload as BottlePayload);
@@ -57,11 +106,19 @@ export function entryMagnitude(e: Entry): { value: number; text: string; unit: '
     case 'combo': {
       const s = breastfeedTotalS(e.payload as BreastfeedPayload);
       const ml = bottleTotalMl(e.payload as BottlePayload);
-      return { value: s, text: ml ? `${fmtDuration(s)} + ${ml} mL` : fmtDuration(s), unit: 's' };
+      return {
+        value: s,
+        text: ml ? `${fmtDuration(s)} + ${ml} mL` : fmtDuration(s),
+        unit: 's',
+      };
     }
     case 'pump': {
       const ml = pumpTotalMl(e.payload as PumpPayload);
       return { value: ml, text: `${ml} mL`, unit: 'ml' };
+    }
+    case 'sleep': {
+      const s = sleepElapsedS(e, new Date());
+      return { value: s, text: fmtDuration(s), unit: 's' };
     }
     default:
       return null;
@@ -72,17 +129,27 @@ export function entryMagnitude(e: Entry): { value: number; text: string; unit: '
 export function headline(e: Entry): { big: string; unit?: string } {
   switch (e.type) {
     case 'bottle':
-      return { big: String(bottleTotalMl(e.payload as BottlePayload)), unit: 'mL' };
+      return {
+        big: String(bottleTotalMl(e.payload as BottlePayload)),
+        unit: 'mL',
+      };
     case 'breastfeed':
     case 'combo':
-      return { big: fmtDuration(breastfeedTotalS(e.payload as BreastfeedPayload)) };
+      return {
+        big: fmtDuration(breastfeedTotalS(e.payload as BreastfeedPayload)),
+      };
     case 'diaper': {
       const p = e.payload as DiaperPayload;
-      return { big: p.wet && p.dirty ? 'both' : p.dirty ? 'dirty' : p.wet ? 'wet' : 'dry' };
+      return {
+        big:
+          p.wet && p.dirty ? 'both' : p.dirty ? 'dirty' : p.wet ? 'wet' : 'dry',
+      };
     }
     case 'pump':
       return { big: String(pumpTotalMl(e.payload as PumpPayload)), unit: 'mL' };
-    case 'growth':
+    case 'sleep':
+      return { big: fmtDuration(sleepElapsedS(e, new Date())) };
+    default:
       return { big: '' };
   }
 }
@@ -96,7 +163,10 @@ export function sameAgainLabel(e: Entry): string {
     }
     case 'breastfeed': {
       const p = e.payload as BreastfeedPayload;
-      const parts = [p.left_s >= 30 && `Left ${fmtDuration(p.left_s)}`, p.right_s >= 30 && `Right ${fmtDuration(p.right_s)}`].filter(Boolean);
+      const parts = [
+        p.left_s >= 30 && `Left ${fmtDuration(p.left_s)}`,
+        p.right_s >= 30 && `Right ${fmtDuration(p.right_s)}`,
+      ].filter(Boolean);
       return parts.join(', ') || 'Breastfeed';
     }
     case 'diaper':
@@ -118,7 +188,10 @@ export function recentAmounts(entries: Entry[], n = 4): number[] {
   return out;
 }
 
-export function lastOf(entries: Entry[], pred: (e: Entry) => boolean): Entry | undefined {
+export function lastOf(
+  entries: Entry[],
+  pred: (e: Entry) => boolean,
+): Entry | undefined {
   let best: Entry | undefined;
   for (const e of entries) {
     if (e.deleted_at || !pred(e)) continue;
@@ -127,16 +200,62 @@ export function lastOf(entries: Entry[], pred: (e: Entry) => boolean): Entry | u
   return best;
 }
 
-export function iconFor(e: Entry): 'bottle' | 'breast' | 'diaper' | 'pump' | 'growth' | 'combo' {
-  return e.type === 'breastfeed' ? 'breast' : e.type;
+export function iconFor(
+  e: Entry,
+):
+  | 'bottle'
+  | 'breast'
+  | 'diaper'
+  | 'pump'
+  | 'growth'
+  | 'combo'
+  | 'sleep'
+  | 'unknown' {
+  return e.type === 'breastfeed'
+    ? 'breast'
+    : ['bottle', 'diaper', 'pump', 'growth', 'combo', 'sleep'].includes(e.type)
+      ? (e.type as Exclude<ReturnType<typeof iconFor>, 'breast'>)
+      : 'unknown';
+}
+export function sleepElapsedS(e: Entry, now: Date) {
+  return Math.max(
+    0,
+    Math.floor(
+      (Math.min(Date.parse(e.ended_at ?? now.toISOString()), +now) -
+        Date.parse(e.started_at)) /
+        1000,
+    ),
+  );
+}
+export function editorFor(
+  type: string,
+): 'breastfeed' | 'bottle' | 'diaper' | 'pump' | 'sleep' | null {
+  switch (type) {
+    case 'breastfeed':
+    case 'combo':
+      return 'breastfeed';
+    case 'bottle':
+    case 'diaper':
+    case 'pump':
+    case 'sleep':
+      return type;
+    default:
+      return null;
+  }
 }
 
-export function runningElapsed(p: BreastfeedPayload, now: Date): { left_s: number; right_s: number; open: 'left' | 'right' | null } {
-  let left = 0, right = 0, open: 'left' | 'right' | null = null;
+export function runningElapsed(
+  p: BreastfeedPayload,
+  now: Date,
+): { left_s: number; right_s: number; open: 'left' | 'right' | null } {
+  let left = 0,
+    right = 0,
+    open: 'left' | 'right' | null = null;
   for (const seg of p.segments ?? []) {
     const end = seg.end ? new Date(seg.end).getTime() : now.getTime();
     const d = Math.max(0, (end - new Date(seg.start).getTime()) / 1000);
-    if (seg.side === 'left') left += d; else right += d;
+    if (seg.side === 'left') left += d;
+    else right += d;
     if (!seg.end) open = seg.side;
   }
   return { left_s: Math.floor(left), right_s: Math.floor(right), open };

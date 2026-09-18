@@ -12,3 +12,5 @@ export function notInFuture(d: Date, label = 'Time', slackMinutes = 10): string 
   if (d.getTime() > Date.now() + slackMinutes * 60_000) return `${label} is in the future`;
   return undefined;
 }
+
+export const sleepTooLong = (start: Date, end: Date) => +end - +start > 16 * 3600000 ? 'This sleep is over 16 hours. Check the times.' : undefined;

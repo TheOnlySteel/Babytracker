@@ -17,3 +17,7 @@ npm run build
 ```
 
 Deployed at https://lanebabytracker.netlify.app.
+
+## Sleep and NurseryPad integration
+
+The server-backed sleep integration and Core2 nursery pad are described in [the rollout guide](docs/rollout.md). Start there for migration order, rollout gates, verification, and rollback. Firmware and pinned build instructions are in [NurseryPad](NurseryPad/README.md). Automatic sleep derivation defaults to off.

@@ -1,14 +1,14 @@
 <script lang="ts">
   import { Plus, ChevronDown, ChevronUp, RotateCcw } from '@lucide/svelte';
-  import type { Entry } from '$lib/data/types';
   import { store } from '$lib/data/store.svelte';
-  import { openSheet, type SheetKind } from '$lib/data/ui.svelte';
-  import { entryMagnitude, headline, iconFor, sameAgainLabel, runningElapsed } from '$lib/data/derive';
+  import { openSheet, openEntry, type SheetKind } from '$lib/data/ui.svelte';
+  import { entryLabel, entryMagnitude, headline, iconFor, sameAgainLabel, runningElapsed } from '$lib/data/derive';
   import { fmtAgo, fmtDuration } from '$lib/data/format';
   import type { BreastfeedPayload } from '$lib/data/types';
   import { dayKey, ofCard } from '$lib/data/summary';
   import Icon from '$lib/ui/Icon.svelte';
   import LogRow from './LogRow.svelte';
+  import CribStatus from './CribStatus.svelte';
 
   let {
     card,
@@ -18,7 +18,7 @@
     sheetFor,
     sameAgain = false
   }: {
-    card: 'feed' | 'diaper' | 'pump';
+    card: 'feed' | 'diaper' | 'pump' | 'sleep';
     title: string;
     color: string;
     lastLabel: string;
@@ -31,8 +31,8 @@
   let busy = $state(false);
 
   const all = $derived(ofCard(store.entries, card));
-  const last = $derived(all.find((e) => e.ended_at !== null || (e.type !== 'breastfeed' && e.type !== 'pump')));
-  const running = $derived(all.find((e) => e.ended_at === null && (e.type === 'breastfeed' || e.type === 'pump')));
+  const last = $derived(all.find((e) => e.ended_at !== null || (e.type !== 'breastfeed' && e.type !== 'pump' && e.type !== 'sleep')));
+  const running = $derived(all.find((e) => e.ended_at === null && (e.type === 'breastfeed' || e.type === 'pump' || e.type === 'sleep')));
   const todayKey = $derived(dayKey(store.now));
   const ydKey = $derived(dayKey(new Date(store.now.getTime() - 86400_000)));
   const recent = $derived(all.filter((e) => {
@@ -49,10 +49,6 @@
     return m;
   });
   const head = $derived(last ? headline(last) : null);
-
-  function editSheet(e: Entry): SheetKind {
-    return e.type === 'breastfeed' || e.type === 'combo' ? 'breastfeed' : e.type === 'bottle' ? 'bottle' : e.type === 'diaper' ? 'diaper' : 'pump';
-  }
 
   async function repeat() {
     if (!last || busy) return;
@@ -77,22 +73,23 @@
 <section class="card">
   <div class="band" style:background={color}>
     <h2>{title}</h2>
-    <button class="plus" onclick={() => openSheet(running ? editSheet(running) : sheetFor, running)} aria-label="Add {title}">
+    <button class="plus" onclick={() => running ? openEntry(running) : openSheet(sheetFor)} aria-label="Add {title}">
       <Plus size={30} strokeWidth={2.4} />
     </button>
   </div>
 
+  {#if card === 'sleep'}<CribStatus />{/if}
   {#if running}
-    <button class="lastrow running" onclick={() => openSheet(editSheet(running), running)}>
+    <button class="lastrow running" onclick={() => openEntry(running)}>
       <Icon kind={iconFor(running)} />
       <div class="mid">
-        <div class="lbl">Timer running</div>
+        <div class="lbl">{running.type === 'sleep' ? entryLabel(running) : 'Timer running'}</div>
         <div class="muted">started {fmtAgo(running.started_at, store.now)}</div>
       </div>
       <div class="big live">{running.type === 'breastfeed' ? fmtDuration(runningElapsed(running.payload as BreastfeedPayload, store.now).left_s + runningElapsed(running.payload as BreastfeedPayload, store.now).right_s) : fmtDuration((store.now.getTime() - new Date(running.started_at).getTime()) / 1000)}</div>
     </button>
   {:else if last && head}
-    <button class="lastrow" onclick={() => openSheet(editSheet(last), last)}>
+    <button class="lastrow" onclick={() => openEntry(last)}>
       <Icon kind={iconFor(last)} />
       <div class="mid">
         <div class="lbl">{lastLabel}</div>
@@ -120,7 +117,7 @@
   {#if expanded}
     <div class="log">
       {#each recent as e (e.id)}
-        <LogRow entry={e} {max} onclick={() => openSheet(editSheet(e), e)} />
+        <LogRow entry={e} {max} onclick={() => openEntry(e)} />
       {:else}
         <div class="muted none">Nothing today or yesterday</div>
       {/each}

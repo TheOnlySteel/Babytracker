@@ -55,7 +55,7 @@
   }
 
   async function save() {
-    const payload: DiaperPayload = { wet, dirty, dry, texture: dirty ? [...texture] : [], color: dirty ? [...color] : [], blowout, rash };
+    const payload: DiaperPayload = { ...p, wet, dirty, dry, texture: dirty ? [...texture] : [], color: dirty ? [...color] : [], blowout, rash };
     saving = true;
     try {
       if (editing) await store.update(editing.id, { started_at: startedAt.toISOString(), payload, note: note || null }, { undoLabel: 'Updated diaper', expectedUpdatedAt: version });
