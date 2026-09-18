@@ -110,10 +110,24 @@ Deno.serve(async (req) => {
     const localDate = localParts(new Date(), tz).date;
     let lastRise = localInstant(localDate + ' ' + riseClock, tz);
     if (+lastRise > Date.now()) lastRise = localInstant(shiftDate(localDate, -1) + ' ' + riseClock, tz);
+    // Cradlewise's day runs from its day-start setting (08:00 by default) and the metrics/c-chart
+    // responses window themselves on whatever start_time we send, so ask from yesterday's 08:00 local
+    // to now; that keeps rise and bedtime meaningful per app-day and covers 32-56 h of history.
+    const nowLocal = localParts(new Date(), tz);
+    const dayStart = `${shiftDate(nowLocal.date, nowLocal.minute < 480 ? -2 : -1)} 08:00:00`;
+    const range = query({ start_time: dayStart, end_time: nowLocal.text });
     const calm = ['sleeping', 'away'].includes(state.status);
     if (!calm || !state.observed_at || Date.now() - Date.parse(state.observed_at) >= 60000)
       await fetchApi('status', '/baby/status', (raw) => ({ observation: parseStatus(raw, new Date().toISOString()) }));
     // Always derive, even when admission/backoff blocked a fetch: stale open rows need closure.
+    // Before derivation is switched on, fetch the sleep history once so the real response shape
+    // can be inspected (sleep_status.history_raw) against the parser; nothing is written to entries.
+    if (!state.derive_enabled && !state.history_at)
+      await fetchApi('history', `/sleep/c-chart?${range}`, (body) => {
+        const parsed = parseHistory(body, tz);
+        const note = parsed.unknownLabels.length ? `unknown_labels:${parsed.unknownLabels.slice(0, 5).join(',')}` : parsed.droppedIntervals ? `dropped_intervals:${parsed.droppedIntervals}` : null;
+        return { history_raw: body, history_ok: true, ...(note ? { history_error: note } : {}) };
+      });
     if (state.derive_enabled) {
       const from = new Date(Date.now() - 36 * 3600000).toISOString();
       const sleepRows = () =>
@@ -129,11 +143,10 @@ Deno.serve(async (req) => {
       const actions = deriveSleep(observations, await sleepRows(), { ...ctx, now: new Date().toISOString() });
       if (actions.length) await rpc('cw_apply', { hh, token, actions });
       if (!state.history_at || Date.now() - Date.parse(state.history_at) >= 3600000 || Date.parse(state.history_at) < +lastRise) {
-        const range = query({ start_time: localParts(new Date(Date.now() - 36 * 3600000), tz).text, end_time: localParts(new Date(), tz).text });
         let history: ReturnType<typeof parseHistory> | undefined;
         const ok = await fetchApi('history', `/sleep/c-chart?${range}`, (raw) => {
           history = parseHistory(raw, tz);
-          return {};
+          return { history_raw: raw };
         });
         if (ok && history) {
           const applied = await rpc('cw_apply', { hh, token, actions: reconcileSleep(history.sleeps, await sleepRows(), ctx) });
@@ -142,10 +155,8 @@ Deno.serve(async (req) => {
         }
       }
     }
-    if (!state.metrics_at || Date.now() - Date.parse(state.metrics_at) >= 1800000) {
-      const range = query({ start_time: localParts(new Date(Date.now() - 36 * 3600000), tz).text, end_time: localParts(new Date(), tz).text });
+    if (!state.metrics_at || Date.now() - Date.parse(state.metrics_at) >= 1800000)
       await fetchApi('metrics', `/sleep/day-metrics?${range}`, (raw) => parseMetrics(raw, tz));
-    }
     return reply(200, { ok: true });
   } catch {
     return reply(500, { error: 'poll_failed' });

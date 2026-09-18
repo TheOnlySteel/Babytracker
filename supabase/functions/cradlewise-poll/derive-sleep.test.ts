@@ -157,32 +157,43 @@ describe("upstream contracts (synthetic, not captured baby data)", () => {
     expect(() => parseStatus({ ...raw, since: t(30) }, t(20))).toThrow();
     expect(() => parseStatus({ ...raw, since: undefined }, t(20))).toThrow();
   });
-  it("uses raw local clock values rather than display strings", () => {
-    const result = parseMetrics(
+  it("reads bed and rise times whichever way the raw value is expressed", () => {
+    // The first live response (2026-09-18): raw values are offsetless UTC, display strings local.
+    const live = parseMetrics(
       {
-        timezone: "America/Los_Angeles",
+        timezone: "America/Vancouver",
         metrics: [
           {
-            date: "2026-09-17",
+            date: "2026-09-17 20:48:41.000000",
             banners: [
-              {
-                header: "BEDTIME",
-                data: {
-                  value: "2026-09-16 20:30:00.000000",
-                  display_value: "8h30",
-                },
-              },
-              {
-                header: "RISE TIME",
-                data: { value: "2026-09-17 07:45:00.000000" },
-              },
+              { header: "RISE TIME", data: { value: "2026-09-17 19:02:07.352690", display_value: "12:02 pm" } },
+              { header: "BEDTIME", data: { value: "2026-09-18 05:58:26.573776", display_value: "10:58 pm" } },
+              { header: "NAPS", data: { value: 1, naps: [{ title: "Nap 1", start_time: "2:59 pm", end_time: "3:28 pm", duration: "28m" }] } },
+              { header: "AWAKE IN BED", data: { value: 28, display_value: "28m" } },
             ],
           },
         ],
       },
       "America/Los_Angeles",
     );
-    expect(result).toMatchObject({ bed_min: 1230, rise_min: 465 });
+    expect(live).toMatchObject({ bed_min: 22 * 60 + 58, rise_min: 12 * 60 + 2, day_metrics: { awake_in_bed_s: 28, naps: [] } });
+    // The documented form (local raw values) still reads correctly because the display string decides.
+    const documented = parseMetrics(
+      {
+        timezone: "America/Los_Angeles",
+        metrics: [
+          {
+            date: "2026-09-17 08:00:00.000000",
+            banners: [
+              { header: "BEDTIME", data: { value: "2026-09-16 20:30:00.000000", display_value: "8:30 pm" } },
+              { header: "RISE TIME", data: { value: "2026-09-17 07:45:00.000000", display_value: "7:45 am" } },
+            ],
+          },
+        ],
+      },
+      "America/Los_Angeles",
+    );
+    expect(documented).toMatchObject({ bed_min: 1230, rise_min: 465 });
   });
   it("extracts explicit sleep boundaries and drops only the intervals it cannot trust", () => {
     const raw = {

@@ -60,11 +60,45 @@ function vendorInstant(v: unknown, tz: string): string | null {
   }
 }
 
+/** Parses a display string such as "10:58 pm" or "7:45 am" to minutes after local midnight. */
+function displayMinute(v: unknown): number | null {
+  if (typeof v !== 'string') return null;
+  const m = v.trim().match(/^(\d{1,2})(?::(\d{2}))?\s*([ap])\.?m\.?$/i);
+  if (!m) return null;
+  const h = Number(m[1]) % 12,
+    min = Number(m[2] ?? 0);
+  return (m[3].toLowerCase() === 'p' ? h + 12 : h) * 60 + min;
+}
+
 /**
- * GET /sleep/day-metrics → bed and rise minutes in the household zone, the seven banners, and the
- * NAPS banner's nap list as sleep intervals (the best-documented history source for naps).
- * The response's own `timezone` interprets its local timestamps; the household zone only decides
- * the minute-of-day for bed and rise.
+ * A raw banner timestamp as an instant. The documentation calls these local, but the first live
+ * response carried them as offsetless UTC with a local `display_value` beside them. Both readings
+ * are tried and the one that agrees with the display string wins; with no display string, UTC is
+ * assumed, since that is what the API actually sent.
+ */
+function bannerInstant(raw: unknown, display: unknown, tz: string): Date | null {
+  if (typeof raw !== 'string') return null;
+  const m = raw.match(/^(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2}:\d{2})/);
+  if (!m) return null;
+  const asUtc = new Date(`${m[1]}T${m[2]}Z`);
+  let asLocal: Date | null = null;
+  try {
+    asLocal = localInstant(`${m[1]} ${m[2]}`, tz, 'strict');
+  } catch {
+    asLocal = null;
+  }
+  const want = displayMinute(display);
+  if (want !== null) {
+    for (const d of [asUtc, asLocal]) if (d && localParts(d, tz).minute === want) return d;
+  }
+  return Number.isFinite(+asUtc) ? asUtc : asLocal;
+}
+
+/**
+ * GET /sleep/day-metrics → bed and rise minutes in the household zone, plus the raw banners.
+ * The most recent day in the response is used. The response's own `timezone` governs its display
+ * strings; the household zone only decides the minute-of-day for bed and rise. The NAPS banner
+ * lists naps as display strings ("2:59 pm"), so it is kept for people, not parsed into intervals.
  */
 export function parseMetrics(raw: unknown, householdTz: string) {
   const r = record(raw);
@@ -76,8 +110,8 @@ export function parseMetrics(raw: unknown, householdTz: string) {
   const banner = (name: string) => banners.find((b) => b && typeof b.header === 'string' && b.header.toUpperCase() === name);
   const value = (name: string) => banner(name)?.data?.value;
   const minute = (name: string) => {
-    const at = vendorInstant(value(name), tz);
-    return at ? localParts(new Date(at), householdTz).minute : null;
+    const at = bannerInstant(value(name), banner(name)?.data?.display_value, tz);
+    return at ? localParts(at, householdTz).minute : null;
   };
   const naps: HistorySleep[] = [];
   for (const n of Array.isArray(banner('NAPS')?.data?.naps) ? banner('NAPS').data.naps : []) {
