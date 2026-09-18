@@ -1,6 +1,8 @@
 # Sleep and NurseryPad — what is in this branch and how to roll it out
 
-Status as of 2026-09-18. This branch carries the implementation of `docs/core2-integration-plan.md` (v2). The code started from a Codex implementation package; it was reviewed in four parts (database, poller, web app, firmware), and the findings were fixed here before anything was committed. The live Supabase project already runs migrations 0001–0003 with the household's real data; none of 0004–0006 has been applied, no Edge Function is deployed, no cron is scheduled and no pad has been paired. **Automatic sleep derivation is off by default and stays off until step 8 below.**
+Status as of 2026-09-18, updated after the merge of PR #7: migrations **0004, 0005 and 0006 are applied to the live project** (step 1 below is done; the web app on lanebabytracker.netlify.app is the merged build). No Edge Function is deployed, no cron is scheduled, no pad is paired, and derivation is off. The paragraph that follows describes the branch as it was written.
+
+This branch carries the implementation of `docs/core2-integration-plan.md` (v2). The code started from a Codex implementation package; it was reviewed in four parts (database, poller, web app, firmware), and the findings were fixed here before anything was committed. The live Supabase project already runs migrations 0001–0003 with the household's real data; none of 0004–0006 has been applied, no Edge Function is deployed, no cron is scheduled and no pad has been paired. **Automatic sleep derivation is off by default and stays off until step 8 below.**
 
 ## What is here
 
@@ -20,7 +22,7 @@ Web: the household timezone is unknown until the server says so and the device z
 
 ## Rollout, in order
 
-1. Back up the database (Supabase dashboard → Database → Backups, or a `pg_dump`). Apply **0004, then 0005, then 0006** as three separate migrations with the Supabase connector's `apply_migration`, never pasted together: the enum value must commit before 0005 references it.
+1. **Done 2026-09-18.** 0004, 0005 and 0006 were applied as three separate migrations with the Supabase connector; the 821 imported rows were tagged `via = 'nara'` without their `updated_at` moving. Lesson recorded for next time: the web app queries the `sleep` enum value and subscribes to `sleep_status`, so its readers must not be deployed before 0004 and 0005; PR #7 merged first and the phones had a window of about a minute where loading failed until 0004 went in.
 2. In the web app's Settings, confirm the household timezone (it defaults to America/Los_Angeles in the database) so History and Summary group days the way the phones already do.
 3. Unplug or reflash **every** standalone CradleWatch unit before the server poller starts. The token's quota has one consumer.
 4. Add Edge Function secrets `CW_TOKEN` (from the Cradlewise dashboard), `HOUSEHOLD_ID` (`acced28e-72c4-4189-b859-e1d5b74ae85a`) and `SCHEDULER_SECRET` (any long random string). Deploy `cradlewise-poll` with `verify_jwt=false` from `supabase/config.toml`; the scheduler secret is what authenticates the cron.
