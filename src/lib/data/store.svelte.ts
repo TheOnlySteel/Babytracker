@@ -61,6 +61,8 @@ class Store {
   now = $state(new Date());
 
   private channel: RealtimeChannel | null = null;
+  /** The monitor's own channel: an error here must never take the log's live sync down. */
+  private sleepChannel: RealtimeChannel | null = null;
   private ticker: ReturnType<typeof setInterval> | null = null;
   private everSubscribed = false;
 
@@ -259,6 +261,28 @@ class Store {
             this.prefs = (p.new as { prefs: Prefs }).prefs;
         },
       )
+      .subscribe((status) => {
+        if (status === 'SUBSCRIBED') {
+          this.realtime = 'live';
+          // After a dropped connection, catch up on anything missed while offline.
+          if (this.everSubscribed && this.loaded) {
+            this.refreshEntries();
+            this.refreshPrefs();
+          }
+          this.everSubscribed = true;
+        } else if (
+          status === 'CHANNEL_ERROR' ||
+          status === 'TIMED_OUT' ||
+          status === 'CLOSED'
+        ) {
+          this.realtime = 'offline';
+        }
+      });
+    // Separate channel: if the monitor tables are missing or the subscription is refused, the
+    // header still reports the log as live and entries keep syncing; the chip just stays quiet.
+    if (this.sleepChannel) sb.removeChannel(this.sleepChannel);
+    this.sleepChannel = sb
+      .channel('sleep_status')
       .on(
         'postgres_changes',
         {
@@ -274,28 +298,15 @@ class Store {
         },
       )
       .subscribe((status) => {
-        if (status === 'SUBSCRIBED') {
-          this.realtime = 'live';
-          // After a dropped connection, catch up on anything missed while offline.
-          if (this.everSubscribed && this.loaded) {
-            this.refreshEntries();
-            this.refreshSleepStatus();
-            this.refreshPrefs();
-          }
-          this.everSubscribed = true;
-        } else if (
-          status === 'CHANNEL_ERROR' ||
-          status === 'TIMED_OUT' ||
-          status === 'CLOSED'
-        ) {
-          this.realtime = 'offline';
-        }
+        if (status === 'SUBSCRIBED' && this.loaded) this.refreshSleepStatus();
       });
   }
 
   private teardown() {
     if (this.channel) supabase().removeChannel(this.channel);
     this.channel = null;
+    if (this.sleepChannel) supabase().removeChannel(this.sleepChannel);
+    this.sleepChannel = null;
     this.entries = [];
     this.sleepStatus = null;
     this.caregivers = [];
