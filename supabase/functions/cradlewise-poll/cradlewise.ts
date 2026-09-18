@@ -50,21 +50,60 @@ export interface HistorySleep {
   end: string;
 }
 
-/** Vendor local timestamps ("YYYY-MM-DD HH:MM:SS.ffffff") are interpreted in the zone the response names. */
-function vendorInstant(v: unknown, tz: string): string | null {
+/**
+ * An offsetless API timestamp ("YYYY-MM-DD HH:MM:SS.ffffff") as an instant. The documentation
+ * calls these local, but the live API sends them in UTC: the last c-chart event of the first
+ * captured response was byte-for-byte the status endpoint's UTC `since`, and the session that
+ * began at "05:58:26" was the BEDTIME banner displayed as "10:58 pm" Pacific. An explicit offset
+ * or Z is honoured if one ever appears. Returns null for anything else.
+ */
+export function apiInstant(v: unknown): string | null {
   if (typeof v !== 'string') return null;
-  try {
-    return localInstant(v, tz, 'strict').toISOString();
-  } catch {
-    return null; // ambiguous DST hour or malformed: the caller drops just this value
-  }
+  const m = v.trim().match(/^(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2}:\d{2})(\.\d+)?(Z|[+-]\d\d:?\d\d)?$/);
+  if (!m) return null;
+  const d = new Date(`${m[1]}T${m[2]}${m[3] ?? ''}${m[4] ?? 'Z'}`);
+  return Number.isFinite(+d) ? d.toISOString() : null;
+}
+
+/** Parses a display string such as "10:58 pm" or "7:45 am" to minutes after local midnight. */
+function displayMinute(v: unknown): number | null {
+  if (typeof v !== 'string') return null;
+  const m = v.trim().match(/^(\d{1,2})(?::(\d{2}))?\s*([ap])\.?m\.?$/i);
+  if (!m) return null;
+  const h = Number(m[1]) % 12,
+    min = Number(m[2] ?? 0);
+  return (m[3].toLowerCase() === 'p' ? h + 12 : h) * 60 + min;
 }
 
 /**
- * GET /sleep/day-metrics → bed and rise minutes in the household zone, the seven banners, and the
- * NAPS banner's nap list as sleep intervals (the best-documented history source for naps).
- * The response's own `timezone` interprets its local timestamps; the household zone only decides
- * the minute-of-day for bed and rise.
+ * A raw banner timestamp as an instant. Live responses carry them as offsetless UTC with a local
+ * `display_value` beside them (see apiInstant). Both readings are still tried and the one that
+ * agrees with the display string wins, so a future switch to local time cannot shift bed and rise
+ * by the zone offset; with no display string, UTC is assumed.
+ */
+function bannerInstant(raw: unknown, display: unknown, tz: string): Date | null {
+  if (typeof raw !== 'string') return null;
+  const m = raw.match(/^(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2}:\d{2})/);
+  if (!m) return null;
+  const asUtc = new Date(`${m[1]}T${m[2]}Z`);
+  let asLocal: Date | null = null;
+  try {
+    asLocal = localInstant(`${m[1]} ${m[2]}`, tz, 'strict');
+  } catch {
+    asLocal = null;
+  }
+  const want = displayMinute(display);
+  if (want !== null) {
+    for (const d of [asUtc, asLocal]) if (d && localParts(d, tz).minute === want) return d;
+  }
+  return Number.isFinite(+asUtc) ? asUtc : asLocal;
+}
+
+/**
+ * GET /sleep/day-metrics → bed and rise minutes in the household zone, plus the raw banners.
+ * The most recent day in the response is used. The response's own `timezone` governs its display
+ * strings; the household zone only decides the minute-of-day for bed and rise. The NAPS banner
+ * lists naps as display strings ("2:59 pm"), so it is kept for people, not parsed into intervals.
  */
 export function parseMetrics(raw: unknown, householdTz: string) {
   const r = record(raw);
@@ -76,13 +115,13 @@ export function parseMetrics(raw: unknown, householdTz: string) {
   const banner = (name: string) => banners.find((b) => b && typeof b.header === 'string' && b.header.toUpperCase() === name);
   const value = (name: string) => banner(name)?.data?.value;
   const minute = (name: string) => {
-    const at = vendorInstant(value(name), tz);
-    return at ? localParts(new Date(at), householdTz).minute : null;
+    const at = bannerInstant(value(name), banner(name)?.data?.display_value, tz);
+    return at ? localParts(at, householdTz).minute : null;
   };
   const naps: HistorySleep[] = [];
   for (const n of Array.isArray(banner('NAPS')?.data?.naps) ? banner('NAPS').data.naps : []) {
-    const start = vendorInstant(n?.start_time, tz),
-      end = vendorInstant(n?.end_time, tz);
+    const start = apiInstant(n?.start_time),
+      end = apiInstant(n?.end_time);
     if (start && end && end > start) naps.push({ start, end });
   }
   const awake = value('AWAKE IN BED');
@@ -112,20 +151,22 @@ function classify(label: unknown): 'sleep' | 'stir' | 'wake' | 'unknown' {
 
 /**
  * GET /sleep/c-chart → sleep intervals from the raw events. Session totals are crib stays, not
- * sleep, so only events are used. An interval that touches a user-added event, an unknown label
- * or an ambiguous timestamp is dropped on its own; the rest of the batch still reconciles.
+ * sleep, so only events are used. Event times are UTC (apiInstant); the response's `timezone`
+ * governs only its display strings, so the household zone plays no part here. An interval that
+ * touches a user-added event, an unknown label or a malformed timestamp is dropped on its own;
+ * the rest of the batch still reconciles. Live vocabulary: event_label sleep / stirring / awake /
+ * away over event_name deep_sleep / light_sleep / quiet_awake / active_awake / away.
  */
-export function parseHistory(raw: unknown, householdTz: string): HistoryParse {
+export function parseHistory(raw: unknown, _householdTz: string): HistoryParse {
   const r = record(raw);
   if (!Array.isArray(r.events)) throw new Error('History shape');
-  const tz = validTimezone(r.timezone) ? r.timezone : householdTz;
   const unknown = new Set<string>();
   let dropped = 0;
   type Ev = { at: string | null; kind: ReturnType<typeof classify>; user: boolean; label: string };
   const events: Ev[] = r.events
     .filter((v: unknown) => v && typeof v === 'object')
     .map((v: any) => ({
-      at: vendorInstant(v.event_time, tz),
+      at: apiInstant(v.event_time),
       kind: classify(v.event_label ?? v.event_name),
       user: v.is_user_added === true,
       label: String(v.event_label ?? v.event_name ?? '')

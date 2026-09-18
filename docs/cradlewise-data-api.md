@@ -10,7 +10,9 @@ Condensed from the official documentation at https://integrations.cradlewise.com
 
 ## Time parameters
 
-`start_time` and `end_time` use `YYYY-MM-DD HH:MM:SS` in the **baby's local time**. A `T` separator fails with 422. In a query string the space **must** be `%20` (a `+` is not the documented form). Responses are not paginated; keep ranges to a week or a month. Responses carry a `timezone` (IANA) that governs every local timestamp in them.
+`start_time` and `end_time` use `YYYY-MM-DD HH:MM:SS` in the **baby's local time**. A `T` separator fails with 422. In a query string the space **must** be `%20` (a `+` is not the documented form). Responses are not paginated; keep ranges to a week or a month. Responses carry a `timezone` (IANA; `America/Vancouver` for this household) that governs their display strings.
+
+**Observed 2026-09-18, contrary to the documentation:** every offsetless timestamp in the sleep responses is **UTC**, not local. The last c-chart `event_time` of the first captured response was byte-for-byte the status endpoint's UTC `since`; the session that began at `05:58:26` was the BEDTIME banner whose `display_value` read `10:58 pm`; the day-metrics `RISE TIME` raw `11:22:40` displayed as `4:22 am`. Only `display_value` strings, `day_start_time` and the `day_aggregates` keys are local. The poller reads raw timestamps as UTC (`apiInstant`) and checks banner values against their display strings so a future switch to local time cannot shift bed and rise by the zone offset.
 
 **Day start time.** A "day" runs from the baby's day-start setting (default 08:00) to the same time next date, so a night that runs past midnight stays with the evening it began. Responses include `day_start_time`; historical data uses the setting active at the time.
 
@@ -67,7 +69,7 @@ Every response carries `X-RateLimit-Remaining` and `X-RateLimit-Reset` (Unix tim
 }
 ```
 
-Sessions are **crib stays** with asleep and awake totals inside them, not sleep intervals. Sleep intervals come from `events`; the documentation shows `event_label: "sleep"` (with `event_name: "deep_sleep"`) but does not enumerate the full label vocabulary. The poller therefore classifies labels by substring (`sleep`, `stir`, wake-like words) and drops any interval touching an unknown label rather than guessing; unknown labels surface in Settings as `history_error`. `is_user_added` marks caregiver-entered sessions/events.
+Sessions are **crib stays** with asleep and awake totals inside them, not sleep intervals. Sleep intervals come from `events`. The documentation shows only `event_label: "sleep"`; the live vocabulary (262 events captured 2026-09-18, nothing outside it) is `event_label` **sleep / stirring / awake / away** over `event_name` **deep_sleep / light_sleep / quiet_awake / active_awake / away**, with `event_value` "5" down to "1" in that order. The poller classifies labels by substring (`sleep`, `stir`, wake-like words) and drops any interval touching an unknown label rather than guessing; unknown labels surface in Settings as `history_error`. `is_user_added` marks caregiver-entered sessions/events, and live sessions also carry `user_added_sleep_id` (null for the crib's own). Event and session timestamps are UTC (see above). The response was wider than asked: a request from yesterday 08:00 local returned events from the previous UTC morning as well, so callers should window the result themselves.
 
 ## GET /sleep/day-metrics?start_time&end_time
 
@@ -85,7 +87,7 @@ One `metrics[]` entry per day in the range, each with seven `banners` always in 
     { "type": "info", "header": "AWAKE IN BED", "data": { "value": 5476, "display_value": "1h 31m" } } ] } ] }
 ```
 
-Raw `value` units differ per banner: LONGEST STRETCH and AWAKE IN BED in seconds, TIME IN BED in minutes, SOOTHES and NAPS counts, RISE TIME and BEDTIME local timestamps. `display_value` is for people. The NAPS banner's `naps[]` is a per-nap list with local start and end times; the poller stores it with the day metrics as a cross-check for derived naps.
+Raw `value` units differ per banner: LONGEST STRETCH and AWAKE IN BED in seconds, TIME IN BED in minutes, SOOTHES and NAPS counts, RISE TIME and BEDTIME **UTC** timestamps with a local `display_value`. Live responses do not keep the documented banner order (RISE TIME arrived third) and add a `description` field, so the poller matches banners by `header`. The live NAPS banner's `naps[]` gives `start_time` and `end_time` as display strings (`"2:59 pm"`), not timestamps; the poller keeps the banner for people and does not derive intervals from it. A day with no bedtime yet omits the value (`bed_min` stays null until the next night).
 
 ## GET /sleep/weekly-sleep-metrics and /sleep/monthly-sleep-metrics
 
@@ -96,4 +98,4 @@ Not used by the poller. Weekly returns `sleep_graph_metrics` (averages and per-d
 - Status every 30 s (60 s while settled asleep or away), admitted through the rolling ledger in `cw_admit`; `429` and `X-RateLimit-Reset` pauses are honoured and capped at one hour.
 - Day metrics at most every 30 minutes; a parse or 4xx problem on this endpoint is recorded as `metrics_error` and never pauses status polling.
 - c-chart at most hourly and once after rise time, from the 200-request reserve; intervals derived from `events` reconcile provisional sleep rows (`history_error` records unknown labels or dropped intervals without stopping the batch).
-- Nothing here is captured production data. The parser tests use synthetic payloads in the documented shapes; the first live responses should be checked against this page and the tests updated if anything differs.
+- The first live responses were captured on 2026-09-18 (`sleep_observations.raw`, `sleep_status.day_metrics`, `sleep_status.history_raw`) and the parsers and their tests were adjusted to them: UTC raw timestamps, display-string naps, unordered banners, the event vocabulary above. The tests carry one payload in each live shape; the rest are synthetic.

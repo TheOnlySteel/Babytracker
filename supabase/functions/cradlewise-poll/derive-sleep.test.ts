@@ -157,39 +157,50 @@ describe("upstream contracts (synthetic, not captured baby data)", () => {
     expect(() => parseStatus({ ...raw, since: t(30) }, t(20))).toThrow();
     expect(() => parseStatus({ ...raw, since: undefined }, t(20))).toThrow();
   });
-  it("uses raw local clock values rather than display strings", () => {
-    const result = parseMetrics(
+  it("reads bed and rise times whichever way the raw value is expressed", () => {
+    // The first live response (2026-09-18): raw values are offsetless UTC, display strings local.
+    const live = parseMetrics(
       {
-        timezone: "America/Los_Angeles",
+        timezone: "America/Vancouver",
         metrics: [
           {
-            date: "2026-09-17",
+            date: "2026-09-17 20:48:41.000000",
             banners: [
-              {
-                header: "BEDTIME",
-                data: {
-                  value: "2026-09-16 20:30:00.000000",
-                  display_value: "8h30",
-                },
-              },
-              {
-                header: "RISE TIME",
-                data: { value: "2026-09-17 07:45:00.000000" },
-              },
+              { header: "RISE TIME", data: { value: "2026-09-17 19:02:07.352690", display_value: "12:02 pm" } },
+              { header: "BEDTIME", data: { value: "2026-09-18 05:58:26.573776", display_value: "10:58 pm" } },
+              { header: "NAPS", data: { value: 1, naps: [{ title: "Nap 1", start_time: "2:59 pm", end_time: "3:28 pm", duration: "28m" }] } },
+              { header: "AWAKE IN BED", data: { value: 28, display_value: "28m" } },
             ],
           },
         ],
       },
       "America/Los_Angeles",
     );
-    expect(result).toMatchObject({ bed_min: 1230, rise_min: 465 });
+    expect(live).toMatchObject({ bed_min: 22 * 60 + 58, rise_min: 12 * 60 + 2, day_metrics: { awake_in_bed_s: 28, naps: [] } });
+    // The documented form (local raw values) still reads correctly because the display string decides.
+    const documented = parseMetrics(
+      {
+        timezone: "America/Los_Angeles",
+        metrics: [
+          {
+            date: "2026-09-17 08:00:00.000000",
+            banners: [
+              { header: "BEDTIME", data: { value: "2026-09-16 20:30:00.000000", display_value: "8:30 pm" } },
+              { header: "RISE TIME", data: { value: "2026-09-17 07:45:00.000000", display_value: "7:45 am" } },
+            ],
+          },
+        ],
+      },
+      "America/Los_Angeles",
+    );
+    expect(documented).toMatchObject({ bed_min: 1230, rise_min: 465 });
   });
   it("extracts explicit sleep boundaries and drops only the intervals it cannot trust", () => {
     const raw = {
       timezone: "America/Los_Angeles",
       events: [
-        { event_name: "deep_sleep", event_label: "sleep", event_time: "2026-09-17 10:00:00.000000", is_user_added: false },
-        { event_label: "awake", event_time: "2026-09-17 11:00:00.000000", is_user_added: false },
+        { event_name: "deep_sleep", event_label: "sleep", event_time: "2026-09-17 17:00:00.000000", is_user_added: false },
+        { event_label: "awake", event_time: "2026-09-17 18:00:00.000000", is_user_added: false },
       ],
     };
     expect(parseHistory(raw, raw.timezone)).toEqual({ sleeps: [{ start: t(0), end: t(60) }], unknownLabels: [], droppedIntervals: 0 });
@@ -200,10 +211,10 @@ describe("upstream contracts (synthetic, not captured baby data)", () => {
         ...raw,
         events: [
           ...raw.events.slice(0, 1),
-          { event_label: "not-in-crib", event_time: "2026-09-17 10:30:00" },
+          { event_label: "not-in-crib", event_time: "2026-09-17 17:30:00" },
           ...raw.events.slice(1),
-          { event_label: "sleep", event_time: "2026-09-17 12:00:00" },
-          { event_label: "awake", event_time: "2026-09-17 12:30:00" },
+          { event_label: "sleep", event_time: "2026-09-17 19:00:00" },
+          { event_label: "awake", event_time: "2026-09-17 19:30:00" },
         ],
       },
       raw.timezone,
@@ -211,14 +222,32 @@ describe("upstream contracts (synthetic, not captured baby data)", () => {
     expect(mixed).toEqual({ sleeps: [{ start: t(120), end: t(150) }], unknownLabels: ["not-in-crib"], droppedIntervals: 1 });
     // A caregiver-added event is a human account: that interval is left alone, the batch is not.
     const user = parseHistory(
-      { ...raw, events: [{ ...raw.events[0], is_user_added: true }, raw.events[1], { event_label: "sleep", event_time: "2026-09-17 12:00:00" }, { event_label: "awake", event_time: "2026-09-17 12:30:00" }] },
+      { ...raw, events: [{ ...raw.events[0], is_user_added: true }, raw.events[1], { event_label: "sleep", event_time: "2026-09-17 19:00:00" }, { event_label: "awake", event_time: "2026-09-17 19:30:00" }] },
       raw.timezone,
     );
     expect(user.sleeps).toEqual([{ start: t(120), end: t(150) }]);
-    // The response's own timezone interprets its timestamps even if the household differs.
-    expect(parseHistory({ ...raw, timezone: "America/New_York" }, "America/Los_Angeles").sleeps[0].start).toBe(
-      new Date(Date.UTC(2026, 8, 17, 14, 0)).toISOString(),
-    );
+    // Event times are UTC whatever zone the response or the household names: the first live
+    // response's last event equalled the status endpoint's UTC `since` to the microsecond.
+    expect(parseHistory({ ...raw, timezone: "America/New_York" }, "America/Los_Angeles").sleeps[0].start).toBe(t(0));
+  });
+  it("reads the live c-chart shape: UTC event times, the full label vocabulary, nothing unknown", () => {
+    const live = {
+      timezone: "America/Vancouver",
+      day_start_time: "2026-09-18 08:00:00.000000",
+      sessions: [{ session_id: "s", start_time: "2026-09-18 05:58:26.573776", end_time: "2026-09-18 11:22:40.101291", is_user_added: false, user_added_sleep_id: null }],
+      events: [
+        { event_name: "deep_sleep", event_label: "sleep", event_value: "5", event_time: "2026-09-18 05:58:26.573776", is_user_added: false },
+        { event_name: "light_sleep", event_label: "sleep", event_value: "4", event_time: "2026-09-18 07:01:51.116649", is_user_added: false },
+        { event_name: "quiet_awake", event_label: "stirring", event_value: "3", event_time: "2026-09-18 07:02:16.928391", is_user_added: false },
+        { event_name: "deep_sleep", event_label: "sleep", event_value: "5", event_time: "2026-09-18 07:04:27.506550", is_user_added: false },
+        { event_name: "active_awake", event_label: "awake", event_value: "2", event_time: "2026-09-18 11:20:46.944294", is_user_added: false },
+        { event_name: "away", event_label: "away", event_value: "1", event_time: "2026-09-18 11:22:40.101291", is_user_added: false },
+      ],
+    };
+    const parsed = parseHistory(live, "America/Los_Angeles");
+    expect(parsed).toEqual({ sleeps: [{ start: "2026-09-18T05:58:26.573Z", end: "2026-09-18T11:20:46.944Z" }], unknownLabels: [], droppedIntervals: 0 });
+    // 05:58:26Z is 10:58 pm Pacific on the 17th, which is what the Cradlewise app showed as bedtime.
+    expect(new Date(parsed.sleeps[0].start).toLocaleTimeString("en-US", { timeZone: "America/Vancouver", hour: "numeric", minute: "2-digit" })).toBe("10:58 PM");
   });
   it("reads the NAPS banner as nap intervals and tolerates unknown banners", () => {
     const result = parseMetrics(
@@ -229,7 +258,7 @@ describe("upstream contracts (synthetic, not captured baby data)", () => {
             date: "2026-09-17 08:00:00.000000",
             banners: [
               { type: "soothes", header: "SOOTHES", data: { value: 3, display_value: "3" } },
-              { type: "naps", header: "NAPS", data: { value: 1, naps: [{ start_time: "2026-09-17 10:00:00.000000", end_time: "2026-09-17 10:45:00.000000", duration_in_mins: 45 }] } },
+              { type: "naps", header: "NAPS", data: { value: 1, naps: [{ start_time: "2026-09-17 17:00:00.000000", end_time: "2026-09-17 17:45:00.000000", duration_in_mins: 45 }] } },
               { type: "info", header: "AWAKE IN BED", data: { value: 5476, display_value: "1h 31m" } },
               { type: "info", header: "SOMETHING NEW", data: { value: null } },
             ],
