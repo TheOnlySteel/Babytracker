@@ -53,4 +53,6 @@ jobs:
       - uses: denoland/setup-deno@v2
         with:
           deno-version: v2.x
-      - run: deno check supabase/functions/cradlewise-poll/index.ts
+      # The repo has a package.json, so Deno 2 would otherwise look for node_modules; the Edge
+      # runtime resolves npm: specifiers itself.
+      - run: deno check --node-modules-dir=none supabase/functions/cradlewise-poll/index.ts
