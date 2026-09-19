@@ -642,34 +642,34 @@ String agoOf(JsonVariant at) {
 String feedSummary(bool tileStyle) {
   JsonObject bf = snapshot["bf"].as<JsonObject>();
   if (!bf.isNull())
-    return "feeding  ·  " + fmtTimer(elapsed(bf));
+    return "feeding  -  " + fmtTimer(elapsed(bf));
   JsonObject last = snapshot["last_feed"].as<JsonObject>();
   if (last.isNull())
     return tileStyle ? "no feeds yet" : "";
   String kind = last["kind"] | "";
   String what = kind == "breastfeed" ? "breast" : String((int)(last["ml"] | 0.0)) + " ml bottle";
-  return tileStyle ? what + "  ·  " + agoOf(last["at"]) : "fed " + what + " " + agoOf(last["at"]);
+  return tileStyle ? what + SEP + agoOf(last["at"]) : "fed " + what + " " + agoOf(last["at"]);
 }
 String diaperSummary(bool tileStyle) {
   JsonObject last = snapshot["last_diaper"].as<JsonObject>();
   if (last.isNull())
     return tileStyle ? "no changes yet" : "";
   String kind = last["kind"] | "wet";
-  return tileStyle ? kind + "  ·  " + agoOf(last["at"]) : kind + " " + agoOf(last["at"]);
+  return tileStyle ? kind + SEP + agoOf(last["at"]) : kind + " " + agoOf(last["at"]);
 }
 String pumpSummary() {
   JsonObject p = snapshot["pump"].as<JsonObject>();
   if (!p.isNull())
-    return "pumping  ·  " + fmtTimer(elapsed(p));
+    return "pumping  -  " + fmtTimer(elapsed(p));
   JsonObject last = snapshot["last_pump"].as<JsonObject>();
   if (last.isNull())
     return "no pumps yet";
-  return String((int)(last["ml"] | 0.0)) + " ml  ·  " + agoOf(last["at"]);
+  return String((int)(last["ml"] | 0.0)) + " ml  -  " + agoOf(last["at"]);
 }
 String cribSummary() {
   JsonObject sl = snapshot["sleep"].as<JsonObject>();
   if (!sl.isNull() && String(sl["source"] | "") != "cradlewise")
-    return "nap  ·  " + fmtTimer(elapsed(sl));
+    return "nap  -  " + fmtTimer(elapsed(sl));
   DisplayState ds = displayState();
   long secs = sinceSecs();
   String dur = secs >= 0 ? "  " + fmtDur(secs) : "";
@@ -693,7 +693,7 @@ String cribSummary() {
 String sleepSummary() {
   JsonObject sl = snapshot["sleep"].as<JsonObject>();
   if (!sl.isNull() && String(sl["source"] | "") == "cradlewise")
-    return "crib nap  ·  " + fmtTimer(elapsed(sl));
+    return "crib nap  -  " + fmtTimer(elapsed(sl));
   return cribSummary();
 }
 /** The timer the strip should show: any running timer whose own screen is not open. */
@@ -738,7 +738,7 @@ void drawTopBar() {
   int x = 12;
   if (screen != HUB) {
     if (hitDown(A_BACK))
-      canvas.fillRoundRect(0, 0, 44, BAR_H - 1, R_BTN, C_PANEL_HI);
+      canvas.fillRect(0, 0, 44, BAR_H - 1, C_PANEL_HI);
     iconChevronLeft(20, cy, C_TEXT);
     hit(0, 0, 44, BAR_H, A_BACK);
     x = 46;
@@ -751,24 +751,24 @@ void drawTopBar() {
   if (ds == DS_CRYING && (millis() / 400) % 2)
     fill = lerpCol(C_CRYING, C_BG, 0.6f);
   if (hitDown(A_DASH))
-    canvas.fillRoundRect(276, 0, 44, BAR_H - 1, R_BTN, C_PANEL_HI);
-  cribCircle(298, cy, hollow ? C_FAINT : fill, C_BORDER, hitDown(A_DASH) ? C_PANEL_HI : C_BG, hollow);
+    canvas.fillRect(276, 0, 44, BAR_H - 1, C_PANEL_HI);
+  stateGem(298, cy, hollow ? C_FAINT : fill, C_BORDER, hitDown(A_DASH) ? C_PANEL_HI : C_PANEL, hollow);
   hit(276, 0, 44, BAR_H, A_DASH);
   // caregiver chip
-  String who = fit(caregiverName(), F_SMALL, 90);
-  int chipW = textW(who, F_SMALL) + 34, chipX = 276 - 4 - chipW;
+  String who = fit(caregiverName(), F_SMALL, 64); // 8 glyphs: the title needs the rest of the bar
+  int chipW = textW(who, F_SMALL) + 22, chipX = 276 - 4 - chipW;
   uint16_t chipFill = hitDown(A_CAREGIVER) ? C_PANEL_HI : C_PANEL;
   panel(chipX, cy - 14, chipW, 28, chipFill, C_BORDER, 14);
   hit(chipX, 0, chipW, BAR_H, A_CAREGIVER);
-  text(who, chipX + 12, cy, F_SMALL, C_TEXT, chipFill, lgfx::textdatum_t::middle_left);
-  iconChevronDown(chipX + chipW - 14, cy, C_MUTED);
+  text(who, chipX + 7, cy, F_SMALL, C_TEXT, chipFill, lgfx::textdatum_t::middle_left);
+  iconChevronDown(chipX + chipW - 8, cy, C_MUTED);
   // clock and the queued-writes dot
   String clk = ntpSynced ? clockStr(time(nullptr)) : "--:--";
   int clkW = textW(clk, F_SMALL);
   text(clk, chipX - 8, cy, F_SMALL, C_MUTED, C_BG, lgfx::textdatum_t::middle_right);
   int right = chipX - 8 - clkW - 8;
   if (queued || timerPending.length()) {
-    canvas.fillCircle(right - 4, cy, 4, failed ? C_AMBER : C_RED);
+    canvas.fillRect(right - 7, cy - 3, 7, 7, failed ? C_AMBER : C_RED);
     right -= 14;
   }
   String title = screen == HUB ? childName() : titleOf(screen);
@@ -785,14 +785,14 @@ void drawStrip() {
   canvas.drawFastHLine(0, y, SCR_W, C_BORDER);
   bool bf = String(timer) == "bf", pump = String(timer) == "pump";
   uint16_t accent = bf ? C_AMBER : pump ? C_PURPLE : C_BLUE;
-  String label = bf     ? "BREASTFEED  ·  " + String(snapshot["bf"]["side"] | "")
+  String label = bf     ? "BREASTFEED  -  " + String(snapshot["bf"]["side"] | "")
                  : pump ? "PUMP"
                  : String(snapshot["sleep"]["source"] | "") == "cradlewise" ? "CRIB NAP"
                                                                           : "NAP";
   label.toUpperCase();
   if (hitDown(A_STRIP_OPEN))
     canvas.fillRect(0, y + 1, 250, STRIP_H - 1, C_PANEL_HI);
-  canvas.fillRoundRect(10, y + 8, 4, 20, 2, accent);
+  canvas.fillRect(10, y + 10, 4, 16, accent);
   text(label, 22, y + 18, F_SMALL, C_TEXT, C_PANEL, lgfx::textdatum_t::middle_left);
   int lx = 22 + textW(label, F_SMALL) + 10;
   text(fmtTimer(elapsed(snapshot[timer].as<JsonObject>())), lx, y + 18, F_BODY, C_TEXT, C_PANEL,
@@ -822,7 +822,7 @@ void drawToast(bool strip) {
        lgfx::textdatum_t::middle_left);
   if (undo) {
     if (hitDown(A_UNDO))
-      canvas.fillRoundRect(SCR_W - PAD - 68, y + 4, 62, 28, 7, lerpCol(C_TOAST, C_UNDO, 0.15f));
+      canvas.fillRect(SCR_W - PAD - 68, y + 4, 62, 28, lerpCol(C_TOAST, C_UNDO, 0.15f));
     text("UNDO", SCR_W - PAD - 37, y + 18, F_SMALL, C_UNDO, C_TOAST);
     hit(SCR_W - PAD - 74, y, 74, 36, A_UNDO);
   }
@@ -836,7 +836,7 @@ void drawCryingOverlay() {
     canvas.drawCircle(160, 112, r + o, ring);
   text("Crying", 160, 104, F_HERO, C_WHITE, C_CRYING);
   long secs = sinceSecs();
-  text(secs >= 0 ? "since " + clockStr(sinceEpoch) + "  ·  " + fmtDur(secs) : "", 160, 144, F_SMALL,
+  text(secs >= 0 ? "since " + clockStr(sinceEpoch) + SEP + fmtDur(secs) : "", 160, 144, F_SMALL,
        lerpCol(C_CRYING, C_WHITE, 0.9f), C_CRYING);
   text("tap to silence the chime", 160, 220, F_SMALL, lerpCol(C_CRYING, C_WHITE, 0.8f), C_CRYING);
   hit(0, 0, SCR_W, SCR_H, A_SILENCE);
@@ -845,22 +845,12 @@ void drawCryingOverlay() {
 // ---------------- screens ----------------
 void hubTile(int x, int y, int w, int h, int id, uint16_t accent, const char *label, const String &sub, int icon) {
   uint16_t fill = tile(x, y, w, h, id, C_PANEL);
-  int iy = y + (h < 72 ? 14 : 18);
-  switch (icon) {
-  case 0:
-    iconDrop(x + 22, iy, accent);
-    break;
-  case 1:
-    iconSwap(x + 22, iy, accent);
-    break;
-  case 2:
-    iconPump(x + 22, iy, accent);
-    break;
-  default:
-    iconMoon(x + 22, iy, accent, fill);
-  }
-  text(label, x + 12, y + h - 30, F_BODY, accent, fill, lgfx::textdatum_t::middle_left);
-  text(fit(sub, F_SMALL, w - 24), x + 12, y + h - 13, F_SMALL, C_MUTED, fill, lgfx::textdatum_t::middle_left);
+  const Sprite &art = icon == 0 ? SPR_HEART : icon == 1 ? SPR_DIAPER : icon == 2 ? SPR_PUMP : SPR_MOON;
+  int scale = h >= 64 ? 2 : 1, side = 16 * scale; // a short tile takes the artwork at 1:1
+  int iy = y + 8 + side / 2;
+  spriteAt(art, x + 10 + side / 2, iy, scale);
+  text(label, x + 14 + side, iy, F_BODY, accent, fill, lgfx::textdatum_t::middle_left);
+  text(fit(sub, F_SMALL, w - 20), x + 10, y + h - 13, F_SMALL, C_MUTED, fill, lgfx::textdatum_t::middle_left);
 }
 void drawHub(int top, int bottom) {
   // status line: crib first in text colour, then the day's log in muted
@@ -872,9 +862,9 @@ void drawHub(int top, int bottom) {
   String rest;
   String fed = feedSummary(false), wet = diaperSummary(false);
   if (fed.length())
-    rest += "  ·  " + fed;
+    rest += SEP + fed;
   if (wet.length())
-    rest += "  ·  " + wet;
+    rest += SEP + wet;
   if (rest.length() && cx < SCR_W - 60)
     text(fit(rest, F_SMALL, SCR_W - PAD - cx), cx, top + 11, F_SMALL, C_MUTED, C_BG, lgfx::textdatum_t::middle_left);
   int y0 = top + 24, avail = bottom - PAD - y0;
@@ -921,7 +911,8 @@ void drawFeedDone(int top, int bottom) {
   deserializeJson(done, lastResultRow);
   long l = done["payload"]["left_s"] | 0, r = done["payload"]["right_s"] | 0;
   int bh = 48, by = bottom - PAD - bh, mid = top + (by - top) / 2;
-  text("Breastfeed saved  ·  " + caregiverName(), 160, top + 16, F_SMALL, C_MUTED, C_BG);
+  text(fit("Breastfeed saved" SEP + caregiverName(), F_SMALL, SCR_W - 2 * PAD), 160, top + 16, F_SMALL, C_MUTED,
+       C_BG);
   text(fmtTimer(l + r), 160, mid, F_HERO, C_TEXT, C_BG);
   text("L " + fmtTimer(l) + "     R " + fmtTimer(r), 160, mid + 32, F_SMALL, C_MUTED, C_BG);
   int w1 = (SCR_W - 2 * PAD - GAP) / 3, w2 = SCR_W - 2 * PAD - GAP - w1;
@@ -963,7 +954,8 @@ void drawChange(int top, int bottom) {
     bool recent = lastKind == kinds[i];
     uint16_t fill = tile(x, y0, w, h, ids[i], recent ? C_TEAL_BG : C_PANEL, recent ? C_TEAL_BORDER : C_BORDER, 1, enabled);
     text(names[i], x + w / 2, y0 + h / 2 - 10, F_BIG, !enabled ? C_FAINT : recent ? C_TEAL : C_TEXT, fill);
-    text(recent && ago.length() ? ago : "one tap saves", x + w / 2, y0 + h / 2 + 16, F_SMALL, C_MUTED, fill);
+    text(fit(recent && ago.length() ? ago : String("one tap"), F_SMALL, w - 10), x + w / 2,
+         y0 + h / 2 + 16, F_SMALL, C_MUTED, fill);
   }
 }
 void drawPump(int top, int bottom) {
@@ -973,7 +965,7 @@ void drawPump(int top, int bottom) {
   iconPlay(160, y0 + h / 2 - 34, enabled ? C_PURPLE : C_FAINT);
   text("START PUMP", 160, y0 + h / 2 + 2, F_BIG, enabled ? C_TEXT : C_FAINT, fill);
   JsonObject last = snapshot["last_pump"].as<JsonObject>();
-  String sub = enabled ? (last.isNull() ? "no pumps yet" : "last " + String((int)(last["ml"] | 0.0)) + " ml  ·  " + agoOf(last["at"]))
+  String sub = enabled ? (last.isNull() ? "no pumps yet" : "last " + String((int)(last["ml"] | 0.0)) + " ml  -  " + agoOf(last["at"]))
                        : "waiting for sync";
   text(sub, 160, y0 + h / 2 + 30, F_SMALL, C_MUTED, fill);
 }
@@ -983,14 +975,15 @@ void drawPumpTimer(int top, int bottom) {
   int bh = 52, by = bottom - PAD - bh, mid = top + (by - top) / 2;
   text("PUMPING", 160, top + 16, F_SMALL, C_PURPLE, C_BG);
   text(fmtTimer(elapsed(p)), 160, mid, F_TIMER, C_TEXT, C_BG);
-  text("amount is asked at the end  ·  " + caregiverName(), 160, mid + 40, F_SMALL, C_MUTED, C_BG);
+  text(fit("amount is asked at the end" SEP + caregiverName(), F_SMALL, SCR_W - 2 * PAD), 160, mid + 40, F_SMALL,
+       C_MUTED, C_BG);
   primaryButton(PAD, by, SCR_W - 2 * PAD, bh, A_STOP_PUMP, "STOP", C_PURPLE, C_PURPLE_INK, F_BODY, enabled);
 }
 void drawPumpAmount(int top, int bottom) {
   DynamicJsonDocument done(2048);
   deserializeJson(done, lastResultRow);
   long secs = max(0L, (long)(parseIso8601Utc(done["ended_at"] | "") - parseIso8601Utc(done["started_at"] | "")));
-  text("Pumped " + fmtDur(secs) + "  ·  total amount", 160, top + 14, F_SMALL, C_MUTED, C_BG);
+  text("Pumped " + fmtDur(secs) + "  -  total amount", 160, top + 14, F_SMALL, C_MUTED, C_BG);
   int bh = 48, by = bottom - PAD - bh;
   stepper(top + 24, by - GAP, pumpAmount, C_PURPLE);
   int w1 = (SCR_W - 2 * PAD - GAP) / 3, w2 = SCR_W - 2 * PAD - GAP - w1;
@@ -1004,24 +997,26 @@ void drawStatsGrid(int y, int bottom, uint16_t bg) {
   {
     struct Cell {
       String n, cap;
-    } cells[6] = {{fmtMin(sleepStats["sleep_min"] | 0.0), "total sleep"},
+    } cells[6] = {{fmtMin(sleepStats["sleep_min"] | 0.0), "day sleep"},
                   {String(sleepStats["naps"] | 0), "naps"},
-                  {fmtMin(sleepStats["longest_nap_min"] | 0.0), "longest nap"},
-                  {fmtMin(sleepStats["last_night_min"] | 0.0), "night sleep"},
+                  {fmtMin(sleepStats["longest_nap_min"] | 0.0), "longest"},
+                  {fmtMin(sleepStats["last_night_min"] | 0.0), "night"},
                   {String(sleepStats["last_night_wakings"] | 0), "wakings"},
                   {sleepStats["awake_in_bed_s"].isNull() ? String("--") : fmtMin((sleepStats["awake_in_bed_s"] | 0.0) / 60),
-                   "awake in bed"}};
+                   "awake"}};
     int fh = 18, gh = bottom - PAD - fh - y, ch = (gh - GAP) / 2, cw = (SCR_W - 2 * PAD - 2 * GAP) / 3;
     for (int i = 0; i < 6; i++) {
       int x = PAD + (i % 3) * (cw + GAP), yy = y + (i / 3) * (ch + GAP);
       panel(x, yy, cw, ch, C_PANEL, C_BORDER);
-      text(cells[i].n, x + 10, yy + ch / 2 - 9, F_BIG, i == 0 ? C_BLUE : C_TEXT, C_PANEL,
+      bool wide = textW(cells[i].n, F_BIG) <= cw - 16;
+      text(cells[i].n, x + 8, yy + ch / 2 - 9, wide ? F_BIG : F_BODY, i == 0 ? C_BLUE : C_TEXT, C_PANEL,
            lgfx::textdatum_t::middle_left);
-      text(cells[i].cap, x + 10, yy + ch / 2 + 14, F_SMALL, C_MUTED, C_PANEL, lgfx::textdatum_t::middle_left);
+      text(fit(cells[i].cap, F_SMALL, cw - 14), x + 8, yy + ch / 2 + 14, F_SMALL, C_MUTED, C_PANEL,
+           lgfx::textdatum_t::middle_left);
     }
-    String foot = "rise " + metrics.rise + "  ·  bed " + metrics.bed;
+    String foot = "rise " + metrics.rise + "  -  bed " + metrics.bed;
     if (sourceObserved)
-      foot += "  ·  crib data " + fmtAgo(sourceAge());
+      foot += SEP "crib " + fmtAgo(sourceAge());
     text(fit(foot, F_SMALL, SCR_W - 2 * PAD), PAD, bottom - PAD - 8, F_SMALL, C_MUTED, bg, lgfx::textdatum_t::middle_left);
   }
 }
@@ -1053,11 +1048,11 @@ void drawSleep(int top, int bottom) {
       int h = 70;
       panel(PAD, y, SCR_W - 2 * PAD, h, C_GREEN_BG, C_GREEN_BORDER);
       if ((millis() / 800) % 2)
-        canvas.fillCircle(PAD + 16, y + 17, 5, C_GREEN_DOT);
+        canvas.fillRect(PAD + 12, y + 13, 9, 9, C_GREEN_DOT);
       else
-        canvas.drawCircle(PAD + 16, y + 17, 5, C_GREEN_DOT);
+        canvas.drawRect(PAD + 12, y + 13, 9, 9, C_GREEN_DOT);
       text("Crib nap", PAD + 30, y + 17, F_BODY, C_TEXT, C_GREEN_BG, lgfx::textdatum_t::middle_left);
-      text("auto  ·  since " + hm(sl["open_since"]), PAD + 30 + textW("Crib nap", F_BODY) + 10, y + 18, F_SMALL, C_MUTED,
+      text("auto  -  since " + hm(sl["open_since"]), PAD + 30 + textW("Crib nap", F_BODY) + 10, y + 18, F_SMALL, C_MUTED,
            C_GREEN_BG, lgfx::textdatum_t::middle_left);
       text(fmtTimer(elapsed(sl)), SCR_W - PAD - 12, y + 17, F_BODY, C_TEXT, C_GREEN_BG, lgfx::textdatum_t::middle_right);
       int bw = (SCR_W - 2 * PAD - 24 - GAP) / 2;
@@ -1085,9 +1080,9 @@ void drawSleep(int top, int bottom) {
       if (y + 20 > bottom - 4)
         break;
       String when = hm(e["start"]) + " - " + hm(e["end"]);
-      String where = String(e["place"] | "") + (String(e["source"] | "") == "cradlewise" ? "  ·  auto" : "");
+      String where = String(e["place"] | "") + (String(e["source"] | "") == "cradlewise" ? "  -  auto" : "");
       text(when, PAD + 6, y + 10, F_SMALL, C_TEXT, C_BG, lgfx::textdatum_t::middle_left);
-      text("·  " + where, PAD + 6 + textW(when, F_SMALL) + 8, y + 10, F_SMALL, C_MUTED, C_BG, lgfx::textdatum_t::middle_left);
+      text("-  " + where, PAD + 6 + textW(when, F_SMALL) + 8, y + 10, F_SMALL, C_MUTED, C_BG, lgfx::textdatum_t::middle_left);
       text(fmtDur(e["duration_s"] | 0L), SCR_W - PAD - 6, y + 10, F_SMALL, C_TEXT, C_BG, lgfx::textdatum_t::middle_right);
       y += 20;
       shown++;
@@ -1100,16 +1095,16 @@ void drawSleep(int top, int bottom) {
 }
 /** Dashboard page two: today's sleep numbers on the dark ground, same chrome as the status page. */
 void drawDashStats() {
-  canvas.fillScreen(C_BG);
+  backdrop(0, 0, SCR_W, SCR_H);
   hit(0, 0, SCR_W, SCR_H, A_DASH_TAP);
   iconSpeaker(22, 18, C_MUTED, volIdx);
   hit(0, 0, 44, BAR_H, A_VOL);
   String banner = bannerText();
-  text(fit(banner.length() ? banner : "sleep today  ·  swipe for lamp", F_SMALL, 200), 160, 18, F_SMALL,
+  text(fit(banner.length() ? banner : "sleep today" SEP "swipe lamp", F_SMALL, 200), 160, 18, F_SMALL,
        banner.length() ? C_AMBER : C_MUTED, C_BG);
-  canvas.fillCircle(298, 18, 13, C_MUTED);
-  canvas.fillCircle(298, 18, 11, C_BG);
-  iconHome(298, 18, C_MUTED);
+  canvas.fillRect(298 - 13, 18 - 13, 26, 26, C_MUTED);
+  canvas.fillRect(298 - 11, 18 - 11, 22, 22, C_BG);
+  spriteAt(SPR_HOME, 298, 20, 1);
   hit(276, 0, 44, BAR_H, A_DASH_HOME);
   drawStatsGrid(BAR_H + 4, SCR_H - 12, C_BG);
   drawPageDots(C_TEXT, C_FAINT);
@@ -1130,7 +1125,7 @@ void drawReview(int top, int bottom) {
                 F_SMALL);
 }
 void drawPad() {
-  canvas.fillScreen(C_BG);
+  backdrop(0, 0, SCR_W, SCR_H);
   bool strip = stripTimer() != nullptr;
   int top = BAR_H, bottom = strip ? SCR_H - STRIP_H : SCR_H;
   if (notice.length() && screen != REVIEW)
@@ -1192,9 +1187,9 @@ void drawFrame() {
     if (fed.length())
       dashFooter += fed;
     if (wet.length())
-      dashFooter += String(dashFooter.length() ? "  ·  " : "") + wet;
+      dashFooter += String(dashFooter.length() ? SEP : "") + wet;
     int naps = snapshot["today"]["naps"] | 0;
-    dashFooter += String(dashFooter.length() ? "  ·  " : "") + "naps today " + String(naps);
+    dashFooter += String(dashFooter.length() ? SEP : "") + "naps " + String(naps);
     if (page == PAGE_LAMP)
       drawLampScreen();
     else if (page == PAGE_STATS)

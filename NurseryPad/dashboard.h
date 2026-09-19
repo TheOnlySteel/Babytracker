@@ -21,7 +21,7 @@ bool nightActive = false;
 uint32_t nsGoodSecs = 0, nsBadSecs = 0; // counted seconds, good vs bad
 int nsWakings = 0;                      // good -> awake/crying/away transitions
 uint32_t lampPeekUntil = 0;             // tap shows numbers briefly
-String dashFooter;                      // "fed 2h 10m ago · wet 45m ago · naps today 2"
+String dashFooter;                      // "fed 2h 10m ago - wet 45m ago - naps today 2"
 
 // ---------------- chimes: short square-wave ocarina motifs ----------------
 // OoT ocarina buttons map to D4 F4 A4 B4 D5; each song is its 6-7 note motif.
@@ -254,7 +254,7 @@ String bannerText() {
 /** Three dots for the dashboard pages: status, stats, lamp. Swipe moves between them. */
 void drawPageDots(uint16_t on, uint16_t off) {
   for (int i = 0; i < 3; ++i)
-    canvas.fillCircle(146 + i * 14, 234, 3, (int)page == i ? on : off);
+    canvas.fillRect(144 + i * 14, 232, 5, 5, (int)page == i ? on : off);
 }
 
 /** Dashboard mode: the whole screen is the crib state. Tap for Home, hold for the lamp. */
@@ -278,27 +278,28 @@ void drawStatusScreen() {
   iconSpeaker(22, 18, dim, volIdx);
   hit(0, 0, 44, BAR_H, A_VOL);
   String banner = bannerText();
-  text(fit(banner.length() ? banner : "tap for Home  ·  hold for lamp", F_SMALL, 200), 160, 18, F_SMALL,
+  text(fit(banner.length() ? banner : "tap Home" SEP "hold lamp", F_SMALL, 200), 160, 18, F_SMALL,
        banner.length() ? C_WHITE : dim, bg);
-  canvas.fillCircle(298, 18, 13, dim);
-  canvas.fillCircle(298, 18, 11, bg);
-  iconHome(298, 18, dim);
+  canvas.fillRect(298 - 13, 18 - 13, 26, 26, dim);
+  canvas.fillRect(298 - 11, 18 - 11, 22, 22, bg);
+  spriteAt(SPR_HOME, 298, 20, 1);
   hit(276, 0, 44, BAR_H, A_DASH_HOME);
 
   // centre: state word (tap replays its chime) and how long
-  text(stateWord(ds), 160, 106, F_HERO, ink, bg);
+  const char *word = stateWord(ds);
+  text(word, 160, 106, textW(word, F_HERO) <= SCR_W - 2 * PAD ? F_HERO : F_BIG, ink, bg);
   hit(60, 82, 200, 50, A_DASH_WORD, ds != DS_BOOT);
   long secs = sinceSecs();
   String sub;
   if (secs >= 0 && ds != DS_BOOT)
-    sub = "since " + clockStr(sinceEpoch) + "  ·  " + fmtDur(secs);
+    sub = "since " + clockStr(sinceEpoch) + SEP + fmtDur(secs);
   text(sub, 160, 146, F_SMALL, dim, bg);
 
   if (ds == DS_CRYING) {
     const char *pill = cryAcked ? "chime silenced" : "tap to silence chime";
     int pw = textW(pill, F_SMALL) + 28;
     uint16_t pillBg = lerpCol(bg, C_WHITE, 0.92f);
-    canvas.fillRoundRect(160 - pw / 2, 190, pw, 26, 13, pillBg);
+    pixelBox(160 - pw / 2, 190, pw, 26, pillBg, C_BORDER);
     text(pill, 160, 203, F_SMALL, rgb565(124, 18, 18), pillBg);
   } else {
     // footer: crib activity, then the day's log line
@@ -306,9 +307,9 @@ void drawStatusScreen() {
     if (cribBounce)
       foot += "bouncing";
     if (cribMusic)
-      foot += String(foot.length() ? "  ·  " : "") + "sound";
+      foot += String(foot.length() ? SEP : "") + "sound";
     if (dashFooter.length())
-      foot += String(foot.length() ? "  ·  " : "") + dashFooter;
+      foot += String(foot.length() ? SEP : "") + dashFooter;
     text(fit(foot, F_SMALL, SCR_W - 2 * PAD), 160, 220, F_SMALL, dim, bg);
   }
   drawPageDots(ink, lerpCol(bg, ink, 0.35f));

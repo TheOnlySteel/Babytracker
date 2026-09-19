@@ -31,10 +31,19 @@ The bundled public trust anchors are GTS Root R4 and ISRG Root X1. Certificate v
 ## Files
 
 - `NurseryPad.ino` is a stub that includes `app.h`. Keeping the program in a header means the Arduino builder never generates prototypes for it, so it builds the same under the IDE, arduino-cli and CI.
-- `ui.h`: design tokens (palette, type scale, spacing) taken from the design canvas at half scale, text and widget helpers, hit-area registry, icons, formatting.
+- `ui.h`: design tokens (palette, type scale, spacing), text and widget helpers, hit-area registry, glyphs, formatting.
+- `pixel_art.h`: generated. The care and navigation sprites from the 2026-09-19 pixel design package, converted from its one-rect-per-pixel SVGs into indexed 16-colour bitmaps with a shared palette. Index 0 is transparent. The package's woodland scenery is deliberately not included.
 - `dashboard.h`: chimes, haptics, derived crib state, and the Dashboard-mode renderers (status, dimmed night, lamp), from CradleWatch.
 - `m5go_leds.h`: the ten LEDs in the M5GO Battery Bottom 2 on GPIO 25, driven with FastLED at a capped, non-blocking 25 fps.
 - `app.h`: state, transport task, write queue, response handling, the pad screens, input, `setup()` and `loop()`.
+
+## Look
+
+The interface is a 16-bit console menu. Surfaces are hard-edged boxes with a gold frame, a light bevel along the top-left, a dark one along the bottom-right, and a hard offset shadow; pressing one sinks the bevel and lights the frame gold. The field behind them is a deep green with a quiet stipple, so it reads as tiled rather than blank. Nothing is rounded and nothing is anti-aliased.
+
+Type is two bitmap faces on a single 8 px grid, used only at integer scales: an 8x8 face for captions and the dashboard state word, an 8x16 face for titles, labels, stat values and timers. Both are ASCII only, so `SEP` stands in for the typographic separator the old face could draw. Glyphs are a fixed 8 px wide, which is wider than the proportional face this replaced, so every string that shares a row with another is measured rather than assumed, and a few captions were shortened to fit their cell rather than be truncated mid-word.
+
+The palette is the design package's: deep green, midnight blue, antique gold, warm cream, moss, terracotta, water blue. Crib states keep an explicit word next to the colour. Artwork is blitted from `pixel_art.h` at 1x or 2x depending on the space. Interface chrome is square, including the crib-state gem and the page pips; the lamp and night-mode glows stay circular because they are light, not furniture.
 
 ## Screens
 
@@ -86,3 +95,5 @@ The 2026-09-18 build had 32 px targets, actions on press without feedback, three
 - Store the outbox as per-slot keys or bytes rather than one NVS string.
 - Measure the frame with the profile build before deciding whether the sprite is worth keeping. Drawing straight to the panel, with a sprite only for the lamp gradient and the crying overlay, is the remaining structural win and would retire the PSRAM question.
 - Physical checks on two units per `docs/rollout.md` step 10.
+- Judge the pixel type on the panel. The layout was checked against the real glyph bitmaps and the real sprite data, but an 8 px bitmap face at arm's length in a dark room is a legibility question a simulator cannot answer.
+- Carry the same visual language into the phone app, which the design package also covers and this change does not touch.
