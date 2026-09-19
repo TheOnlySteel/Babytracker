@@ -1,74 +1,27 @@
-// Adapted from CradleWatch: palette, sounds, haptics and renderers. No network calls.
+// Adapted from CradleWatch: chimes, haptics, derived crib state, and the dashboard-mode
+// renderers (status, dimmed night, lamp). Restyled to the design canvas. No network calls.
 #pragma once
-// ---------------- palette (RGB565), from the design mockups ----------------
-static constexpr uint16_t rgb565(uint8_t r, uint8_t g, uint8_t b) {
-  return (uint16_t)(((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3));
-}
-const uint16_t COL_GREEN = rgb565(15, 138, 78);
-const uint16_t COL_YELLOW = rgb565(227, 168, 11);
-const uint16_t COL_ORANGE = rgb565(226, 96, 27);
-const uint16_t COL_RED = rgb565(212, 43, 43);
-const uint16_t COL_AWAYBG = rgb565(38, 48, 62);
-const uint16_t COL_AWAYTX = rgb565(175, 194, 216);
-const uint16_t COL_DARK = rgb565(12, 12, 16);  // stats page background
-const uint16_t COL_PANEL = rgb565(24, 24, 28); // stats tiles
-const uint16_t COL_DIM = rgb565(140, 140, 148);
-const uint16_t COL_FAINT = rgb565(60, 60, 66);
-const uint16_t COL_WHITE = rgb565(245, 245, 245);
-const uint16_t COL_YELTX = rgb565(33, 25, 0);     // dark text on yellow
-const uint16_t COL_AMBER = rgb565(255, 210, 122); // stale-banner text
-const uint16_t COL_BANNER = rgb565(38, 38, 38);
-const uint16_t COL_NIGHT = rgb565(46, 143, 94); // night-mode text
-const uint16_t COL_NIGHTDOT = rgb565(53, 199, 127);
-const uint16_t COL_BLACK = rgb565(0, 0, 0);
 
-uint16_t lerpCol(uint16_t a, uint16_t b, float t) {
-  if (t <= 0.0f)
-    return a;
-  if (t >= 1.0f)
-    return b;
-  int ar = a >> 11, ag = (a >> 5) & 0x3F, ab = a & 0x1F;
-  int br = b >> 11, bg = (b >> 5) & 0x3F, bb = b & 0x1F;
-  return (uint16_t)(((int)(ar + (br - ar) * t) << 11) | ((int)(ag + (bg - ag) * t) << 5) |
-                    (int)(ab + (bb - ab) * t));
-}
-
-const uint32_t SETTLED_SECS = 10 * 60;    // sleeping this long -> green
-const uint32_t POLL_ACTIVE_MS = 30000;    // status poll while things happen (API floor)
-const uint32_t POLL_CALM_MS = 60000;      // status poll during settled sleep / away
-const uint32_t POLL_BACKOFF_MAX = 300000; // error backoff ceiling
-const uint32_t METRICS_EVERY_MS = 30UL * 60UL * 1000UL;
-const uint32_t METRICS_RETRY_MS = 5UL * 60UL * 1000UL;
-const uint32_t STALE_AFTER_MS = 150000; // no fresh data -> stale banner
+const uint32_t SETTLED_SECS = 10 * 60; // sleeping this long -> settled green
 
 BabyStatus curStatus = BS_NONE;
 time_t sinceEpoch = 0; // when the current status began (UTC)
 bool cribBounce = false;
 bool cribMusic = false;
-uint32_t lastOkMs = 0; // millis() of last good status poll
-uint32_t nextStatusMs = 0;
-uint32_t nextMetricsMs = 0;
-uint32_t statusBackoff = 0; // current error backoff (0 = none)
-bool tokenExpired = false;  // 401
-bool subInactive = false;   // 403
-bool firstStatus = true;    // no chime for the boot-time status
-int caIdx = 0;              // which root CA we present (0=Amazon, 1=ISRG)
-bool caOk = false;          // a request has succeeded with caIdx
-uint32_t nextDrawMs = 0;    // next screen redraw; 0 forces one now
+bool firstStatus = true; // no chime for the boot-time status
 
 DayMetrics metrics;
 
 // ---------------- night score (lamp page) ----------------
-// The lamp is for the off-shift parent: one constant color for how the night
-// is going. Sleeping AND stirring count as good (stirring usually resolves
-// itself); awake, crying, and away count against.
+// The lamp is for the off-shift parent: one constant color for how the night is going.
+// Sleeping AND stirring count as good (stirring usually resolves itself); awake, crying,
+// and away count against.
 Page page = PAGE_STATUS; // persisted; lamp survives reboots
 bool nightActive = false;
 uint32_t nsGoodSecs = 0, nsBadSecs = 0; // counted seconds, good vs bad
 int nsWakings = 0;                      // good -> awake/crying/away transitions
-time_t nightStartEpoch = 0;
-bool nsBackfillTried = false; // one c-chart catch-up after a reboot
-uint32_t lampPeekUntil = 0;   // tap shows numbers briefly
+uint32_t lampPeekUntil = 0;             // tap shows numbers briefly
+String dashFooter;                      // "fed 2h 10m ago · wet 45m ago · naps today 2"
 
 // ---------------- chimes: short square-wave ocarina motifs ----------------
 // OoT ocarina buttons map to D4 F4 A4 B4 D5; each song is its 6-7 note motif.
@@ -154,7 +107,7 @@ int songForStatus(BabyStatus st) {
   }
 }
 
-// ---------------- non-blocking haptics (same pattern as Breathe) ----------------
+// ---------------- non-blocking haptics ----------------
 uint32_t vibeOff = 0;
 void buzz(uint32_t ms, uint8_t power = 120) {
   M5.Power.setVibration(power);
@@ -177,7 +130,7 @@ long daysFromCivil(int y, unsigned m, unsigned d) {
   return era * 146097L + (long)doe - 719468L;
 }
 
-// "2026-03-12T22:15:00Z" (optional fractional seconds) -> epoch, 0 on failure
+// "2026-03-12T22:15:00Z" (optional fractional seconds, optional offset) -> epoch, 0 on failure
 time_t parseIso8601Utc(const String &s) {
   int y, mo, d, h, mi, sec;
   if (sscanf(s.c_str(), "%d-%d-%dT%d:%d:%d", &y, &mo, &d, &h, &mi, &sec) != 6 || y < 1970 ||
@@ -207,7 +160,7 @@ DisplayState displayState() {
     return DS_BOOT;
   switch (curStatus) {
   case BS_SLEEPING: {
-    long asleep = (sinceEpoch && clockSynced()) ? (long)(time(nullptr) - sinceEpoch) : -1;
+    long asleep = (sinceEpoch && nowEpoch()) ? (long)(nowEpoch() - sinceEpoch) : -1;
     return (asleep >= 0 && asleep < (long)SETTLED_SECS) ? DS_SETTLING : DS_ASLEEP;
   }
   case BS_AWAKE:
@@ -220,6 +173,48 @@ DisplayState displayState() {
     return DS_AWAY;
   default:
     return DS_BOOT;
+  }
+}
+/** Seconds the crib has been in its current state, or -1 without a usable clock. */
+long sinceSecs() { return (sinceEpoch && nowEpoch()) ? max(0L, (long)(nowEpoch() - sinceEpoch)) : -1; }
+
+const char *stateWord(DisplayState ds) {
+  switch (ds) {
+  case DS_ASLEEP:
+    return "Asleep";
+  case DS_SETTLING:
+    return "Settling";
+  case DS_STIRRING:
+    return "Stirring";
+  case DS_AWAKE:
+    return "Awake";
+  case DS_CRYING:
+    return "Crying";
+  case DS_AWAY:
+    return "Not in crib";
+  default:
+    return "No crib data";
+  }
+}
+/** Background for a state; `ink` receives the readable text colour on it. */
+uint16_t stateColor(DisplayState ds, uint16_t &ink) {
+  ink = C_WHITE;
+  switch (ds) {
+  case DS_ASLEEP:
+    return C_ASLEEP;
+  case DS_SETTLING:
+  case DS_STIRRING:
+    ink = C_YELLOW_INK;
+    return C_SETTLING;
+  case DS_AWAKE:
+    return C_AWAKE;
+  case DS_CRYING:
+    return C_CRYING;
+  case DS_AWAY:
+    return C_AWAY;
+  default:
+    ink = C_TEXT;
+    return C_BG;
   }
 }
 
@@ -236,363 +231,102 @@ bool inNightWindow() {
   return bed > rise ? (m >= bed || m < rise) : (m >= bed && m < rise);
 }
 
-// epoch of the most recent bedtime boundary (tonight's, or yesterday's if
-// we're past midnight)
-time_t nightWindowStart() {
-  time_t now = time(nullptr);
-  struct tm st;
-  localtime_r(&now, &st);
-  int bed = metrics.bedMin >= 0 ? metrics.bedMin : 20 * 60 + 30;
-  st.tm_hour = bed / 60;
-  st.tm_min = bed % 60;
-  st.tm_sec = 0;
-  st.tm_isdst = -1;
-  time_t s = mktime(&st);
-  if (s > now)
-    s -= 86400;
-  return s;
-}
-
-String fmtDur(long secs) {
-  if (secs < 0)
-    return "";
-  if (secs < 60)
-    return String(secs) + "s";
-  if (secs < 3600)
-    return String(secs / 60) + "m";
-  return String(secs / 3600) + "h " + String((secs % 3600) / 60) + "m";
-}
-
-String clockStr(time_t t) {
-  struct tm lt;
-  localtime_r(&t, &lt);
-  int h12 = lt.tm_hour % 12;
-  if (h12 == 0)
-    h12 = 12;
-  char b[16];
-  snprintf(b, sizeof(b), "%d:%02d %s", h12, lt.tm_min, lt.tm_hour < 12 ? "am" : "pm");
-  return String(b);
-}
-
 // ---------------- UI ----------------
 Preferences prefs;
-M5Canvas canvas(&M5.Display);
 
-const Box BOX_MUTE{0, 0, 42, 36};    // top-right corner, generous reach
-const Box BOX_WORD{40, 78, 240, 84}; // the state name -> replay chime
-
-// calm = settled-green with no recent touch, outside the night window
-const uint8_t BRIGHT_DAY = 90, BRIGHT_CALM = 45, BRIGHT_ALERT = 255, BRIGHT_NIGHT = 12;
+const uint8_t BRIGHT_DAY = 90, BRIGHT_ALERT = 255, BRIGHT_NIGHT = 12;
 const uint8_t BRIGHT_LAMP = 50; // lamp page: constant, never overridden
 uint32_t nightWakeUntil = 0;    // any touch holds full display this long
 
-// level 0 = muted (X); 1-3 = that many waves
-void drawSpeakerIcon(int x, int y, uint16_t col, int level) {
-  canvas.fillRect(x - 9, y - 4, 5, 9, col);                       // body
-  canvas.fillTriangle(x - 5, y, x + 2, y - 8, x + 2, y + 8, col); // cone
-  if (level <= 0) {
-    for (int o = 0; o < 2; ++o) {
-      canvas.drawLine(x + 6, y - 6 + o, x + 14, y + 2 + o, col);
-      canvas.drawLine(x + 14, y - 6 + o, x + 6, y + 2 + o, col);
-    }
-    return;
-  }
-  for (int w = 0; w < level && w < 3; ++w) {
-    int r = 8 + w * 4;
-    canvas.fillArc(x + 2, y, r, r - 2, 300, 360, col);
-    canvas.fillArc(x + 2, y, r, r - 2, 0, 60, col);
-  }
-}
-
-void drawMoon(int cx, int cy, uint16_t fg, uint16_t bg) {
-  canvas.fillCircle(cx, cy, 13, fg);
-  canvas.fillCircle(cx + 6, cy - 5, 11, bg);
-}
-void drawWaves(int cx, int cy, uint16_t fg) {
-  for (int row = -5; row <= 5; row += 10)
-    for (int o = 0; o < 2; ++o) {
-      canvas.fillArc(cx - 7, cy + row + o, 7, 6, 180, 360, fg);
-      canvas.fillArc(cx + 7, cy + row + o, 7, 6, 0, 180, fg);
-    }
-}
-void drawSun(int cx, int cy, uint16_t fg) {
-  canvas.fillCircle(cx, cy, 7, fg);
-  for (int i = 0; i < 8; ++i) {
-    float a = i * PI / 4.0f;
-    canvas.drawLine(cx + (int)(cosf(a) * 10), cy + (int)(sinf(a) * 10), cx + (int)(cosf(a) * 14),
-                    cy + (int)(sinf(a) * 14), fg);
-  }
-}
-void drawBell(int cx, int cy, uint16_t fg) {
-  canvas.fillArc(cx, cy + 3, 11, 0, 180, 360, fg);
-  canvas.fillRect(cx - 12, cy + 3, 24, 3, fg);
-  canvas.fillCircle(cx, cy + 9, 3, fg);
-  canvas.fillCircle(cx, cy - 9, 2, fg);
-}
-void drawCrib(int cx, int cy, uint16_t fg) {
-  for (int dx = -12; dx <= 12; dx += 6)
-    canvas.drawFastVLine(cx + dx, cy - 10, 21, fg);
-  canvas.drawFastHLine(cx - 14, cy - 6, 29, fg);
-  canvas.drawFastHLine(cx - 14, cy + 7, 29, fg);
-}
-void drawBounceGlyph(int x, int y, uint16_t col) {
-  for (int o = 0; o < 2; ++o) {
-    canvas.drawLine(x - 5, y - 2 + o, x, y - 7 + o, col);
-    canvas.drawLine(x, y - 7 + o, x + 5, y - 2 + o, col);
-    canvas.drawLine(x - 5, y + 2 + o, x, y + 7 + o, col);
-    canvas.drawLine(x, y + 7 + o, x + 5, y + 2 + o, col);
-  }
-}
-void drawNoteGlyph(int x, int y, uint16_t col) {
-  canvas.fillCircle(x - 2, y + 5, 3, col);
-  canvas.drawFastVLine(x + 1, y - 6, 11, col);
-  canvas.drawFastVLine(x + 2, y - 6, 5, col);
-}
-
-void drawPageDots(uint16_t on, uint16_t off) {
-  const int xs[3] = {280, 294, 308};
-  for (int i = 0; i < 3; ++i)
-    canvas.fillCircle(xs[i], 222, 3, (int)page == i ? on : off);
-}
-
-// warning banner across the top; returns true if one was drawn
-bool drawBanner() {
-  String msg;
+/** Something is wrong with the data feed; returns the line to show, empty when all is well. */
+String bannerText() {
   if (sourceError.length())
-    msg = "Crib: " + sourceError;
-  else if (!sourceObserved)
-    msg = "Crib data unavailable";
-  else if (sourceAge() > 180)
-    msg = "Crib data " + String(sourceAge() / 60) + " min old";
-  else if (WiFi.status() != WL_CONNECTED)
-    msg = "Wi-Fi lost - reconnecting";
-  else
-    return false;
-  canvas.fillRect(0, 0, 320, 30, COL_BANNER);
-  canvas.setFont(&fonts::FreeSans9pt7b);
-  canvas.setTextDatum(middle_center);
-  canvas.setTextColor(COL_AMBER);
-  canvas.drawString(msg, 160, 15);
-  return true;
+    return "Crib: " + sourceError;
+  if (!sourceObserved)
+    return "Crib data unavailable";
+  if (sourceAge() > 180)
+    return "Crib data " + String(sourceAge() / 60) + " min old";
+  if (WiFi.status() != WL_CONNECTED)
+    return "Wi-Fi lost - reconnecting";
+  return "";
 }
 
+/** Dashboard mode: the whole screen is the crib state. Tap for Home, hold for the lamp. */
 void drawStatusScreen() {
   DisplayState ds = displayState();
-
-  uint16_t bg, fg; // fg = full-strength text/icon color on bg
-  const char *word;
-  switch (ds) {
-  case DS_ASLEEP:
-    bg = COL_GREEN;
-    fg = COL_WHITE;
-    word = "Asleep";
-    break;
-  case DS_SETTLING:
-    bg = COL_YELLOW;
-    fg = COL_YELTX;
-    word = "Settling";
-    break;
-  case DS_STIRRING:
-    bg = COL_YELLOW;
-    fg = COL_YELTX;
-    word = "Stirring";
-    break;
-  case DS_AWAKE:
-    bg = COL_ORANGE;
-    fg = COL_WHITE;
-    word = "Awake";
-    break;
-  case DS_CRYING:
-    bg = COL_RED;
-    fg = COL_WHITE;
-    word = "Crying";
-    break;
-  case DS_AWAY:
-    bg = COL_AWAYBG;
-    fg = COL_AWAYTX;
-    word = "Away";
-    break;
-  default:
-    bg = COL_DARK;
-    fg = COL_WHITE;
-    word = "Unknown";
-    break;
-  }
-  uint16_t dim = lerpCol(bg, fg, 0.75f); // ~75% strength, like the mockups
-  uint16_t faint = lerpCol(bg, fg, 0.55f);
-
+  uint16_t ink;
+  uint16_t bg = stateColor(ds, ink);
+  uint16_t dim = lerpCol(bg, ink, 0.80f);
   canvas.fillScreen(bg);
+  hit(0, 0, SCR_W, SCR_H, A_DASH_TAP); // registered first so the corner buttons win
 
   // crying: expanding ring behind everything
   if (ds == DS_CRYING) {
-    int r = 40 + (int)((millis() % 1100) * 110 / 1100);
-    uint16_t ring = lerpCol(bg, COL_WHITE, 0.8f);
-    for (int o = 0; o < 3; ++o)
-      canvas.drawCircle(160, 120, r + o, ring);
+    int r = 44 + (int)((millis() % 1100) * 100 / 1100);
+    uint16_t ring = lerpCol(bg, C_WHITE, 0.85f);
+    for (int o = 0; o < 4; ++o)
+      canvas.drawCircle(160, 116, r + o, ring);
   }
 
-  // top: banner if something's wrong, else clock + mute toggle
-  if (!drawBanner()) {
-    canvas.setFont(&fonts::FreeSans9pt7b);
-    canvas.setTextDatum(middle_left);
-    canvas.setTextColor(dim);
-    if (clockSynced())
-      canvas.drawString(clockStr(time(nullptr)), 65, 17);
-  }
-  drawSpeakerIcon(20, 18, lerpCol(bg, fg, 0.75f), volIdx);
+  // top row: speaker, hint or banner, home circle
+  iconSpeaker(22, 18, dim, volIdx);
+  hit(0, 0, 44, BAR_H, A_VOL);
+  String banner = bannerText();
+  text(fit(banner.length() ? banner : "tap for Home  ·  hold for lamp", F_SMALL, 200), 160, 18, F_SMALL,
+       banner.length() ? C_WHITE : dim, bg);
+  canvas.fillCircle(298, 18, 13, dim);
+  canvas.fillCircle(298, 18, 11, bg);
+  iconHome(298, 18, dim);
+  hit(276, 0, 44, BAR_H, A_DASH_HOME);
 
-  // center: icon + state word + duration
-  switch (ds) {
-  case DS_ASLEEP:
-  case DS_SETTLING:
-    drawMoon(160, 72, dim, bg);
-    break;
-  case DS_STIRRING:
-    drawWaves(160, 72, dim);
-    break;
-  case DS_AWAKE:
-    drawSun(160, 72, dim);
-    break;
-  case DS_CRYING:
-    drawBell(160, 72, fg);
-    break;
-  case DS_AWAY:
-    drawCrib(160, 72, dim);
-    break;
-  default:
-    break;
-  }
-  canvas.setTextDatum(middle_center);
-  canvas.setFont(&fonts::FreeSansBold24pt7b);
-  canvas.setTextColor(fg);
-  canvas.drawString(word, 160, 118);
-
+  // centre: state word and how long
+  text(stateWord(ds), 160, 106, F_HERO, ink, bg);
+  long secs = sinceSecs();
   String sub;
-  if (sinceEpoch && clockSynced()) {
-    long secs = (long)(time(nullptr) - sinceEpoch);
-    if (ds == DS_AWAY)
-      sub = "since " + clockStr(sinceEpoch);
-    else if (ds == DS_SETTLING)
-      sub = "asleep for " + fmtDur(secs);
-    else
-      sub = "for " + fmtDur(secs);
-  }
-  canvas.setFont(&fonts::FreeSans12pt7b);
-  canvas.setTextColor(dim);
-  canvas.drawString(sub, 160, 158);
+  if (secs >= 0 && ds != DS_BOOT)
+    sub = "since " + clockStr(sinceEpoch) + "  ·  " + fmtDur(secs);
+  text(sub, 160, 146, F_SMALL, dim, bg);
 
-  // crying: acknowledge pill
   if (ds == DS_CRYING) {
     const char *pill = cryAcked ? "chime silenced" : "tap to silence chime";
-    canvas.setFont(&fonts::FreeSans9pt7b);
-    int pw = canvas.textWidth(pill) + 28;
-    canvas.fillRoundRect(160 - pw / 2, 196, pw, 26, 13, lerpCol(bg, COL_WHITE, 0.92f));
-    canvas.setTextDatum(middle_center);
-    canvas.setTextColor(rgb565(124, 18, 18));
-    canvas.drawString(pill, 160, 209);
+    int pw = textW(pill, F_SMALL) + 28;
+    uint16_t pillBg = lerpCol(bg, C_WHITE, 0.92f);
+    canvas.fillRoundRect(160 - pw / 2, 190, pw, 26, 13, pillBg);
+    text(pill, 160, 203, F_SMALL, rgb565(124, 18, 18), pillBg);
   } else {
-    // footer: crib activity, else tonight's bedtime; page dots right
-    canvas.setFont(&fonts::FreeSans9pt7b);
-    canvas.setTextDatum(middle_left);
-    canvas.setTextColor(dim);
-    int x = 14;
-    if (cribBounce) {
-      drawBounceGlyph(x + 5, 221, dim);
-      canvas.drawString("bouncing", x + 16, 222);
-      x += 16 + canvas.textWidth("bouncing") + 16;
-    }
-    if (cribMusic) {
-      drawNoteGlyph(x + 4, 221, dim);
-      canvas.drawString("sound", x + 14, 222);
-      x += 14 + canvas.textWidth("sound") + 16;
-    }
-    if (x == 14 && ds == DS_ASLEEP && metrics.bed.length())
-      canvas.drawString("Bed " + metrics.bed, 14, 222);
-    drawPageDots(fg, faint);
+    // footer: crib activity, then the day's log line
+    String foot;
+    if (cribBounce)
+      foot += "bouncing";
+    if (cribMusic)
+      foot += String(foot.length() ? "  ·  " : "") + "sound";
+    if (dashFooter.length())
+      foot += String(foot.length() ? "  ·  " : "") + dashFooter;
+    text(fit(foot, F_SMALL, SCR_W - 2 * PAD), 160, 222, F_SMALL, dim, bg);
   }
-
-  drawBanner();
-  canvas.pushSprite(0, 0);
 }
 
-void drawStatsScreen() {
-  canvas.fillScreen(COL_DARK);
-
-  if (!drawBanner()) {
-    // battery, top-left: outline glyph with fill level + percentage
-    int batt = M5.Power.getBatteryLevel();
-    if (batt < 0)
-      batt = 0;
-    if (batt > 100)
-      batt = 100;
-    bool charging = (M5.Power.isCharging() == m5::Power_Class::is_charging);
-    uint16_t bcol = (batt <= 20 && !charging) ? COL_AMBER : COL_DIM;
-    canvas.drawRoundRect(14, 10, 24, 14, 3, bcol);
-    canvas.fillRect(38, 14, 3, 6, bcol);               // terminal nub
-    canvas.fillRect(17, 13, batt * 18 / 100, 8, bcol); // fill level
-    canvas.setFont(&fonts::FreeSans9pt7b);
-    canvas.setTextDatum(middle_left);
-    canvas.setTextColor(bcol);
-    canvas.drawString(String(batt) + "%" + (charging ? " +" : ""), 46, 17);
-    canvas.setTextColor(COL_DIM);
-    canvas.setTextDatum(middle_right);
-    if (clockSynced()) {
-      time_t now = time(nullptr);
-      struct tm lt;
-      localtime_r(&now, &lt);
-      char d[24];
-      strftime(d, sizeof(d), "%a %b %d", &lt);
-      canvas.drawString(d, 250, 17);
-    }
-  }
-  drawSpeakerIcon(20, 18, COL_DIM, volIdx);
-
-  const char *labels[6] = {"RISE TIME", "BEDTIME", "LONGEST", "NAPS", "SOOTHES", "AWAKE IN BED"};
-  String vals[6] = {metrics.rise, metrics.bed,     metrics.longest,
-                    metrics.naps, metrics.soothes, metrics.awakeInBed};
-  for (int i = 0; i < 6; ++i) {
-    int col = i % 2, row = i / 2;
-    int x = 12 + col * 156, y = 34 + row * 56;
-    canvas.fillRoundRect(x, y, 148, 50, 10, COL_PANEL);
-    canvas.setFont(&fonts::Font0);
-    canvas.setTextDatum(top_left);
-    canvas.setTextColor(COL_DIM);
-    canvas.drawString(labels[i], x + 12, y + 9);
-    canvas.setFont(&fonts::FreeSansBold12pt7b);
-    canvas.setTextColor(COL_WHITE);
-    canvas.drawString(vals[i].length() ? vals[i] : "--", x + 12, y + 22);
-  }
-
-  canvas.setFont(&fonts::FreeSans9pt7b);
-  canvas.setTextDatum(middle_left);
-  canvas.setTextColor(COL_DIM);
-  canvas.drawString(metrics.inBed.length() ? "In bed " + metrics.inBed : "", 14, 222);
-  drawPageDots(COL_WHITE, COL_FAINT);
-
-  drawBanner();
-  canvas.pushSprite(0, 0);
-}
-
+/** Settled night sleep, lights nearly off: one dot, one line. */
 void drawNightScreen() {
-  canvas.fillScreen(COL_BLACK);
+  canvas.fillScreen(C_BLACK);
+  hit(0, 0, SCR_W, SCR_H, A_DASH_TAP);
   const float glow[4] = {0.05f, 0.09f, 0.14f, 0.22f};
   const int rad[4] = {78, 58, 40, 24};
   for (int i = 0; i < 4; ++i)
-    canvas.fillCircle(160, 104, rad[i], lerpCol(COL_BLACK, COL_GREEN, glow[i]));
-  canvas.fillCircle(160, 104, 6, COL_NIGHTDOT);
+    canvas.fillCircle(160, 104, rad[i], lerpCol(C_BLACK, C_ASLEEP, glow[i]));
+  canvas.fillCircle(160, 104, 6, C_NIGHTDOT);
   String sub = "Asleep";
-  if (sinceEpoch && clockSynced())
-    sub += "  " + fmtDur((long)(time(nullptr) - sinceEpoch));
-  canvas.setFont(&fonts::FreeSans9pt7b);
-  canvas.setTextDatum(middle_center);
-  canvas.setTextColor(COL_NIGHT);
-  canvas.drawString(sub, 160, 168);
-  drawBanner();
-  canvas.pushSprite(0, 0);
+  long secs = sinceSecs();
+  if (secs >= 0)
+    sub += "  " + fmtDur(secs);
+  text(sub, 160, 168, F_SMALL, C_NIGHT, C_BLACK);
+  String banner = bannerText();
+  if (banner.length())
+    text(banner, 160, 18, F_SMALL, C_MUTED, C_BLACK);
 }
 
 // score -> color: >=85% is a great baby night (deep green); the band slides
-// through amber down to a soft ember at 50%, and stays ember below — no
+// through amber down to a soft ember at 50%, and stays ember below - no
 // alarm-red about a hard night someone is already living
 uint16_t scoreColor(float p) {
   const uint16_t GOODC = rgb565(18, 160, 88);
@@ -607,6 +341,7 @@ uint16_t scoreColor(float p) {
   return LOWC;
 }
 
+/** Lamp: one colour for how the night is going. Tap peeks at the numbers, hold returns. */
 void drawLampScreen() {
   uint32_t tot = nsGoodSecs + nsBadSecs;
   bool haveScore = nightActive && tot >= 45 * 60 && sourceAge() <= 900 &&
@@ -614,44 +349,26 @@ void drawLampScreen() {
   uint16_t col = haveScore ? scoreColor((float)nsGoodSecs / (float)tot)
                            : rgb565(64, 74, 100); // neutral: night not underway yet
 
-  canvas.fillScreen(COL_BLACK);
+  canvas.fillScreen(C_BLACK);
+  hit(0, 0, SCR_W, SCR_H, A_DASH_TAP);
   const float glow[5] = {0.10f, 0.18f, 0.30f, 0.48f, 0.80f};
   const int rad[5] = {150, 120, 95, 72, 50};
   for (int i = 0; i < 5; ++i)
-    canvas.fillCircle(160, 120, rad[i], lerpCol(COL_BLACK, col, glow[i]));
+    canvas.fillCircle(160, 120, rad[i], lerpCol(C_BLACK, col, glow[i]));
 
   if ((int32_t)(millis() - lampPeekUntil) < 0) { // tap-to-peek overlay
-    canvas.setTextDatum(middle_center);
-    canvas.setTextColor(COL_WHITE);
     if (haveScore) {
       int pct = (int)(100.0f * nsGoodSecs / tot + 0.5f);
-      canvas.setFont(&fonts::FreeSansBold24pt7b);
-      canvas.drawString(String(pct) + "%", 160, 96);
-      canvas.setFont(&fonts::FreeSans9pt7b);
-      canvas.drawString(
-          "settled " + fmtDur((long)nsGoodSecs) + "   awake " + fmtDur((long)nsBadSecs), 160, 148);
-      canvas.drawString(String(nsWakings) + (nsWakings == 1 ? " waking" : " wakings"), 160, 172);
-    } else {
-      canvas.setFont(&fonts::FreeSans12pt7b);
-      canvas.drawString(nightActive ? String("night just started")
-                                    : "night starts " +
-                                          (metrics.bed.length() ? metrics.bed : String("8:30 pm")),
-                        160, 120);
-    }
+      text(String(pct) + "%", 160, 96, F_HERO, C_WHITE, col);
+      text("settled " + fmtDur((long)nsGoodSecs) + "   awake " + fmtDur((long)nsBadSecs), 160, 148, F_SMALL,
+           C_WHITE, col);
+      text(String(nsWakings) + (nsWakings == 1 ? " waking" : " wakings"), 160, 172, F_SMALL, C_WHITE, col);
+    } else
+      text(nightActive ? String("night just started")
+                       : "night starts " + (metrics.bed.length() ? metrics.bed : String("20:30")),
+           160, 120, F_BODY, C_WHITE, col);
   }
-  drawBanner();
-  canvas.pushSprite(0, 0);
-}
-
-void drawBootScreen(const char *msg) {
-  canvas.fillScreen(COL_DARK);
-  canvas.setTextDatum(middle_center);
-  canvas.setFont(&fonts::FreeSansBold18pt7b);
-  canvas.setTextColor(COL_WHITE);
-  canvas.drawString("NurseryPad", 160, 96);
-  canvas.setFont(&fonts::FreeSans9pt7b);
-  canvas.setTextColor(COL_DIM);
-  canvas.drawString(msg, 160, 140);
-  drawBanner();
-  canvas.pushSprite(0, 0);
+  String banner = bannerText();
+  if (banner.length())
+    text(banner, 160, 18, F_SMALL, C_MUTED, C_BLACK);
 }
