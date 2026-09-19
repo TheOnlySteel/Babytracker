@@ -58,7 +58,11 @@ Physical buttons: A is Back, B is Home, C is Dashboard. Sub-screens return to th
 
 ## Input model
 
-Every tappable element registers its rectangle while it is drawn; nothing is smaller than 44 px. A press highlights the element and buzzes; the action fires on release while the finger is still over it, so a slip cancels. A press on a disabled control is swallowed. Precedence: waking a dimmed screen, then the element under the finger. The frame is one full-screen sprite pushed inside a single display write, in internal RAM when that leaves TLS and JSON their room, else in PSRAM. Brightness is written to the PMIC only when it changes, since it shares the touch controller's I2C bus.
+Every tappable element registers two rectangles while it is drawn: the one it drew, and that one grown to 44 px. A press inside a drawn rectangle takes it outright; a near miss goes to the nearest centre rather than to whatever was drawn last. The top bar and the timer strip own their rows, and nothing drawn in the body may grow into them, so a short control sitting flush under the bar cannot steal the Back chevron's lower half. Touches at y >= 240 are left to buttons A, B and C, which is what M5Unified raises there; they never also fire a screen control.
+
+A press highlights the element and buzzes. It stays armed while the finger stays within 22 px of the element and re-arms if the finger comes back, so an ordinary thumb roll no longer eats the tap; it fires on release and is abandoned if the element has left the screen meanwhile. A press on a disabled control is swallowed. Precedence: waking a dimmed screen, then the element under the finger.
+
+The frame is one full-screen sprite, in internal RAM when that leaves TLS and JSON their room, else in PSRAM. A change confined to one control repaints and transfers only that rectangle, since `pushImage` clips before it transfers; a full 320x240 push is about 31 ms of SPI time by itself, and the panel cannot see the finger while it happens. Input is sampled at the top of the loop and again the instant a repaint ends, so a frame costs at most one sample rather than a gesture. Build with `-DNURSERYPAD_PROFILE` to print frame times and the worst input gap to serial at 115200. Brightness is written to the PMIC only when it changes, since it shares the touch controller's I2C bus.
 
 ## Behaviour that matters
 
@@ -74,10 +78,12 @@ Compilation does not verify touchscreen coordinates, sound level, Wi-Fi and cert
 
 ## Status and known gaps (2026-09-19)
 
-The 2026-09-18 build had 32 px targets, actions on press without feedback, three type sizes on one screen and a bottom message banner that hid content; it was replaced by the screens above, which follow the design canvas (https://claude.ai/artifact/97CjRPpawvbcUEZ2h5q6he) at half scale. Verified here: a clean compile with all warnings on. Not verified here: anything on a board. Still to do:
+The 2026-09-18 build had 32 px targets, actions on press without feedback, three type sizes on one screen and a bottom message banner that hid content; it was replaced by the screens above, which follow the design canvas (https://claude.ai/artifact/97CjRPpawvbcUEZ2h5q6he) at half scale. The screens that replaced it still resolved a touch by draw order, which let the body's first control take the bottom rows of the top bar: on Sleep the tab strip owned 14 of the bar's 36 rows, so the lower half of the Back chevron selected a tab and the crib circle opened Stats. The input model above is the fix. Verified here: a clean compile with all warnings on, and the hit table simulated off the shipped `hit`/`hitAt` code to confirm the bar keeps all 44 of its rows on every screen. Not verified here: anything on a board, including the frame times the profile build reports. Still to do:
 
 - The feed screen cannot suggest the next side; the snapshot does not carry the last side yet.
 - Restore the remaining CradleWatch niceties the fork dropped: the daytime calm dim and the boot screen.
 - Bundle GTS Root R1 next to R4 and ISRG X1 after confirming the chain the board actually sees (`openssl s_client -connect <project>.supabase.co:443 -showcerts`); keep the CA that last succeeded instead of retrying from the first on every request.
 - Store the outbox as per-slot keys or bytes rather than one NVS string.
+- Repaint only the control a stepper tap changed. Every action still marks the whole frame dirty, so holding minus or plus costs a full repaint per 5 ml.
+- Measure the frame with the profile build before deciding whether the sprite is worth keeping. Drawing straight to the panel, with a sprite only for the lamp gradient and the crying overlay, is the remaining structural win and would retire the PSRAM question.
 - Physical checks on two units per `docs/rollout.md` step 10.

@@ -62,7 +62,7 @@ const uint16_t C_NIGHTDOT = rgb565(53, 199, 127);
 
 // ---------------- layout ----------------
 const int SCR_W = 320, SCR_H = 240;
-const int BAR_H = 36;   // top bar
+const int BAR_H = 44;   // top bar; MIN_TAP, so Back and the crib circle are full-size targets
 const int STRIP_H = 36; // timer strip
 const int PAD = 8;      // screen edge padding
 const int GAP = 6;      // between tiles
@@ -112,36 +112,99 @@ String fit(const String &s, const lgfx::IFont *font, int maxW) {
 }
 
 // ---------------- hit areas ----------------
-// Every tappable thing registers itself while it is drawn; the touch handler looks the
-// press up here. Areas are grown to MIN_TAP and given 4 px of slop.
+// Every tappable thing registers itself while it is drawn, keeping two rectangles: the one it
+// actually drew, and that rectangle grown to MIN_TAP and confined to the band it belongs to.
+// A press inside a drawn rectangle wins outright; a near miss goes to the nearest centre.
+// Resolving near misses by distance rather than by registration order is what stops the body's
+// first control from stealing the top bar, which the bar can never win on order because it draws
+// first. Confining growth to a band is what stops a short control sitting flush under the bar
+// from growing up over the Back chevron.
 struct Hit {
-  int x, y, w, h, id;
+  int16_t x, y, w, h;     // grown to MIN_TAP, clamped to the band: used for near misses
+  int16_t dx, dy, dw, dh; // exactly as drawn: used for direct hits and for repainting
+  int16_t id;
   bool enabled;
 };
 Hit hits[24];
 int hitCount = 0;
-int pressedId = 0; // while a finger is down on a hit area
+int pressedId = 0; // the control under the finger, or 0; drives the pressed highlight
+int hitBandTop = 0, hitBandBottom = SCR_H;
+/** Limits where the controls drawn next may grow to. The bar and the strip own their rows. */
+void hitBand(int top, int bottom) {
+  hitBandTop = top;
+  hitBandBottom = bottom;
+}
 void hit(int x, int y, int w, int h, int id, bool enabled = true) {
   if (hitCount >= 24)
     return;
-  if (w < MIN_TAP) {
-    x -= (MIN_TAP - w) / 2;
-    w = MIN_TAP;
+  int gx = x, gy = y, gw = w, gh = h;
+  if (gw < MIN_TAP) {
+    gx -= (MIN_TAP - gw) / 2;
+    gw = MIN_TAP;
   }
-  if (h < MIN_TAP) {
-    y -= (MIN_TAP - h) / 2;
-    h = MIN_TAP;
+  if (gh < MIN_TAP) {
+    gy -= (MIN_TAP - gh) / 2;
+    gh = MIN_TAP;
   }
-  hits[hitCount++] = {x, y, w, h, id, enabled};
+  // Slide back inside the band before giving any height up, so a short control grows the only
+  // way it can rather than reaching into its neighbour's rows.
+  if (gy + gh > hitBandBottom)
+    gy = hitBandBottom - gh;
+  if (gy < hitBandTop)
+    gy = hitBandTop;
+  if (gy + gh > hitBandBottom)
+    gh = hitBandBottom - gy;
+  if (gx + gw > SCR_W)
+    gx = SCR_W - gw;
+  if (gx < 0)
+    gx = 0;
+  if (gx + gw > SCR_W)
+    gw = SCR_W - gx;
+  if (gh <= 0 || gw <= 0)
+    return;
+  hits[hitCount++] = {(int16_t)gx, (int16_t)gy, (int16_t)gw, (int16_t)gh,
+                      (int16_t)x,  (int16_t)y,  (int16_t)w,  (int16_t)h,
+                      (int16_t)id, enabled};
 }
+/** Resolves a touch: 0 for nothing, -1 when a disabled control owns the point. */
 int hitAt(int px, int py, int slop = 4) {
-  for (int i = hitCount - 1; i >= 0; i--) {
+  if (py >= SCR_H) // below the glass: those rows are buttons A/B/C, never a screen control
+    return 0;
+  for (int i = hitCount - 1; i >= 0; i--) { // inside something drawn: topmost wins
     const Hit &h = hits[i];
-    if (px >= h.x - slop && px < h.x + h.w + slop && py >= h.y - slop && py < h.y + h.h + slop)
-      return h.enabled ? h.id : -1; // -1: a disabled control was hit, swallow the tap
+    if (px >= h.dx && px < h.dx + h.dw && py >= h.dy && py < h.dy + h.dh)
+      return h.enabled ? h.id : -1;
   }
-  return 0;
+  int best = 0;
+  long bestDist = 0;
+  bool found = false;
+  for (int i = hitCount - 1; i >= 0; i--) { // near miss: nearest centre wins
+    const Hit &h = hits[i];
+    if (px < h.x - slop || px >= h.x + h.w + slop || py < h.y - slop || py >= h.y + h.h + slop)
+      continue;
+    long ddx = px - (h.x + h.w / 2), ddy = py - (h.y + h.h / 2);
+    long dist = ddx * ddx + ddy * ddy;
+    if (!found || dist < bestDist) {
+      found = true;
+      bestDist = dist;
+      best = h.enabled ? h.id : -1;
+    }
+  }
+  return best;
 }
+/** The rectangle a control drew, so just that control can be repainted. */
+bool hitRect(int id, int &x, int &y, int &w, int &h) {
+  for (int i = hitCount - 1; i >= 0; i--)
+    if (hits[i].id == id) {
+      x = hits[i].dx;
+      y = hits[i].dy;
+      w = hits[i].dw;
+      h = hits[i].dh;
+      return true;
+    }
+  return false;
+}
+/** True while the finger is down on this control and has not rolled off it. */
 bool hitDown(int id) { return pressedId == id; }
 
 // ---------------- widgets ----------------

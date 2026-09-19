@@ -54,10 +54,99 @@ bool pending = false, failed = false, statsWanted = false;
 String notice;                       // persistent problem line; tapping it opens Review
 String toastText, undoOpId, undoRow; // transient confirmation and the one-shot log it can undo
 uint32_t toastUntil = 0;
-bool dirty = true; // a redraw is wanted before the next tick
+// Build with -DNURSERYPAD_PROFILE to print frame and input timing to serial at 115200. Off by
+// default: it costs a timer read per frame and a serial write every five seconds.
+#ifdef NURSERYPAD_PROFILE
+uint32_t profFullUs = 0, profFullN = 0, profRectUs = 0, profRectN = 0;
+uint32_t profSampleAt = 0, profWorstGap = 0, profReportAt = 0;
+void profSampled() {
+  uint32_t now = millis(), gap = now - profSampleAt;
+  if (profSampleAt && gap > profWorstGap)
+    profWorstGap = gap;
+  profSampleAt = now;
+  if ((int32_t)(now - profReportAt) < 0)
+    return;
+  profReportAt = now + 5000;
+  Serial.printf("frame full %lu us x%lu | rect %lu us x%lu | worst input gap %lu ms\n",
+                (unsigned long)(profFullN ? profFullUs / profFullN : 0), (unsigned long)profFullN,
+                (unsigned long)(profRectN ? profRectUs / profRectN : 0), (unsigned long)profRectN,
+                (unsigned long)profWorstGap);
+  profFullUs = profFullN = profRectUs = profRectN = profWorstGap = 0;
+}
+#endif
+
+bool dirty = true; // a full repaint is wanted before the next tick
 uint32_t nextDraw = 0, lastTouch = 0, nextPoll = 0, retryAt = 0, touchAt = 0;
-int pressX = 0, pressY = 0;
+int pressX = 0, pressY = 0, moveX = 0, moveY = 0;
+int armedId = 0; // the control this gesture began on; survives a roll off and back on
 bool longFired = false, swallowTouch = false;
+
+// Pressing a control changes one rectangle. Repainting and pushing all 320x240 for that costs
+// about 31 ms of SPI time by itself, and M5.update() does not run while it happens, so the panel
+// is blind to the next touch for the whole of it. Marking just the rectangle keeps both the
+// repaint and the transfer proportional to what actually changed.
+bool dirtyRect = false;
+int dirtyX = 0, dirtyY = 0, dirtyW = 0, dirtyH = 0;
+void markRect(int x, int y, int w, int h) {
+  if (x < 0) {
+    w += x;
+    x = 0;
+  }
+  if (y < 0) {
+    h += y;
+    y = 0;
+  }
+  if (x + w > SCR_W)
+    w = SCR_W - x;
+  if (y + h > SCR_H)
+    h = SCR_H - y;
+  if (w <= 0 || h <= 0)
+    return;
+  if (!dirtyRect) {
+    dirtyX = x;
+    dirtyY = y;
+    dirtyW = w;
+    dirtyH = h;
+    dirtyRect = true;
+    return;
+  }
+  int right = max(dirtyX + dirtyW, x + w), foot = max(dirtyY + dirtyH, y + h);
+  dirtyX = min(dirtyX, x);
+  dirtyY = min(dirtyY, y);
+  dirtyW = right - dirtyX;
+  dirtyH = foot - dirtyY;
+}
+/** Marks a registered control, with room for its border and pressed highlight. */
+void markControl(int id) {
+  int x, y, w, h;
+  if (id <= 0)
+    return;
+  if (!hitRect(id, x, y, w, h)) {
+    dirty = true; // drawn before the current hit table existed: repaint everything
+    return;
+  }
+  markRect(x - 3, y - 3, w + 6, h + 6);
+}
+/** Moves the highlight, repainting only the control losing it and the one taking it. */
+void setPressed(int id) {
+  if (id == pressedId)
+    return;
+  markControl(pressedId);
+  pressedId = id;
+  markControl(pressedId);
+}
+/** How far a finger may roll off a control before the press is abandoned. The old test allowed
+ *  12 px at release only, which silently ate an ordinary thumb roll. */
+const int CANCEL_SLOP = 22;
+bool stillOn(int id, int x, int y) {
+  int rx, ry, rw, rh;
+  if (id <= 0)
+    return false;
+  if (!hitRect(id, rx, ry, rw, rh))
+    return false; // it has left the screen since the press: the crying overlay, or a new snapshot
+  return x >= rx - CANCEL_SLOP && x < rx + rw + CANCEL_SLOP && y >= ry - CANCEL_SLOP &&
+         y < ry + rh + CANCEL_SLOP;
+}
 uint8_t brightness = 0;
 
 String uuid() {
@@ -643,12 +732,16 @@ const char *titleOf(Screen s) {
 
 // ---------------- chrome ----------------
 void drawTopBar() {
+  hitBand(0, BAR_H); // nothing in the bar may grow past it, and nothing outside may grow into it
+  const int cy = BAR_H / 2;
   canvas.drawFastHLine(0, BAR_H - 1, SCR_W, C_LINE);
   int x = 12;
   if (screen != HUB) {
-    iconChevronLeft(18, 18, C_TEXT);
-    hit(0, 0, 36, BAR_H, A_BACK);
-    x = 38;
+    if (hitDown(A_BACK))
+      canvas.fillRoundRect(0, 0, 44, BAR_H - 1, R_BTN, C_PANEL_HI);
+    iconChevronLeft(20, cy, C_TEXT);
+    hit(0, 0, 44, BAR_H, A_BACK);
+    x = 46;
   }
   // crib circle: the way into Dashboard mode from anywhere
   DisplayState ds = displayState();
@@ -657,33 +750,37 @@ void drawTopBar() {
   bool hollow = ds == DS_BOOT;
   if (ds == DS_CRYING && (millis() / 400) % 2)
     fill = lerpCol(C_CRYING, C_BG, 0.6f);
-  cribCircle(298, 18, hollow ? C_FAINT : fill, C_BORDER, C_BG, hollow);
+  if (hitDown(A_DASH))
+    canvas.fillRoundRect(276, 0, 44, BAR_H - 1, R_BTN, C_PANEL_HI);
+  cribCircle(298, cy, hollow ? C_FAINT : fill, C_BORDER, hitDown(A_DASH) ? C_PANEL_HI : C_BG, hollow);
   hit(276, 0, 44, BAR_H, A_DASH);
   // caregiver chip
   String who = fit(caregiverName(), F_SMALL, 90);
   int chipW = textW(who, F_SMALL) + 34, chipX = 276 - 4 - chipW;
   uint16_t chipFill = hitDown(A_CAREGIVER) ? C_PANEL_HI : C_PANEL;
-  panel(chipX, 4, chipW, 28, chipFill, C_BORDER, 14);
+  panel(chipX, cy - 14, chipW, 28, chipFill, C_BORDER, 14);
   hit(chipX, 0, chipW, BAR_H, A_CAREGIVER);
-  text(who, chipX + 12, 18, F_SMALL, C_TEXT, chipFill, lgfx::textdatum_t::middle_left);
-  iconChevronDown(chipX + chipW - 14, 18, C_MUTED);
+  text(who, chipX + 12, cy, F_SMALL, C_TEXT, chipFill, lgfx::textdatum_t::middle_left);
+  iconChevronDown(chipX + chipW - 14, cy, C_MUTED);
   // clock and the queued-writes dot
   String clk = ntpSynced ? clockStr(time(nullptr)) : "--:--";
   int clkW = textW(clk, F_SMALL);
-  text(clk, chipX - 8, 18, F_SMALL, C_MUTED, C_BG, lgfx::textdatum_t::middle_right);
+  text(clk, chipX - 8, cy, F_SMALL, C_MUTED, C_BG, lgfx::textdatum_t::middle_right);
   int right = chipX - 8 - clkW - 8;
   if (queued || timerPending.length()) {
-    canvas.fillCircle(right - 4, 18, 4, failed ? C_AMBER : C_RED);
+    canvas.fillCircle(right - 4, cy, 4, failed ? C_AMBER : C_RED);
     right -= 14;
   }
   String title = screen == HUB ? childName() : titleOf(screen);
-  text(fit(title, F_BODY, right - x), x, 18, F_BODY, C_TEXT, C_BG, lgfx::textdatum_t::middle_left);
+  text(fit(title, F_BODY, right - x), x, cy, F_BODY, C_TEXT, C_BG, lgfx::textdatum_t::middle_left);
+  hitBand(0, SCR_H);
 }
 void drawStrip() {
   const char *timer = stripTimer();
   if (!timer)
     return;
   int y = SCR_H - STRIP_H;
+  hitBand(y, SCR_H);
   canvas.fillRect(0, y, SCR_W, STRIP_H, C_PANEL);
   canvas.drawFastHLine(0, y, SCR_W, C_BORDER);
   bool bf = String(timer) == "bf", pump = String(timer) == "pump";
@@ -707,6 +804,7 @@ void drawStrip() {
   canvas.drawFastVLine(250, y, STRIP_H, C_BORDER);
   text("STOP", 285, y + 18, F_SMALL, enabled ? C_TEXT : C_FAINT, C_PANEL);
   hit(250, y, 70, STRIP_H, A_STRIP_STOP, enabled);
+  hitBand(0, SCR_H);
 }
 void drawNotice(int y) {
   canvas.fillRect(0, y, SCR_W, 22, C_BG);
@@ -832,7 +930,9 @@ void drawFeedDone(int top, int bottom) {
 }
 /** Minus / value / plus row centred between `top` and `bottom`. */
 void stepper(int top, int bottom, int value, uint16_t accent) {
-  int cy = top + (bottom - top) / 2, s = 60;
+  int s = 60, cy = top + (bottom - top) / 2;
+  if (cy - s / 2 < top) // a strip and a notice together leave too little room to centre in
+    cy = top + s / 2;
   uint16_t fm = tile(PAD + 24, cy - s / 2, s, s, A_MINUS, C_PANEL);
   iconMinus(PAD + 24 + s / 2, cy, C_TEXT);
   (void)fm;
@@ -1036,6 +1136,7 @@ void drawPad() {
   if (notice.length() && screen != REVIEW)
     bottom -= 22;
   drawTopBar();
+  hitBand(top, bottom);
   switch (screen) {
   case HUB:
     drawHub(top, bottom);
@@ -1073,14 +1174,18 @@ void drawPad() {
   default:
     break;
   }
+  hitBand(0, SCR_H);
   if (notice.length() && screen != REVIEW)
     drawNotice(bottom);
   if (strip)
     drawStrip();
   drawToast(strip);
 }
-void render() {
+/** Composes the whole frame into the sprite. Under a clip rectangle it still walks every widget,
+ *  but writes pixels only inside it, which is where a sprite in PSRAM costs its time. */
+void drawFrame() {
   hitCount = 0;
+  hitBand(0, SCR_H);
   if (screen == DASHBOARD) {
     dashFooter = "";
     String fed = feedSummary(false), wet = diaperSummary(false);
@@ -1103,9 +1208,41 @@ void render() {
     if (displayState() == DS_CRYING && !cryAcked)
       drawCryingOverlay();
   }
+}
+void render() {
+  dirty = false;
+  dirtyRect = false;
+#ifdef NURSERYPAD_PROFILE
+  uint32_t t0 = micros();
+#endif
+  drawFrame();
   M5.Display.startWrite();
   canvas.pushSprite(0, 0);
   M5.Display.endWrite();
+#ifdef NURSERYPAD_PROFILE
+  profFullUs += micros() - t0;
+  profFullN++;
+#endif
+}
+/** Repaints and transfers one rectangle. pushImage clips before it transfers, so only this
+ *  rectangle crosses the bus: a pressed control costs about a millisecond instead of thirty. */
+void renderRect(int x, int y, int w, int h) {
+  dirtyRect = false;
+#ifdef NURSERYPAD_PROFILE
+  uint32_t t0 = micros();
+#endif
+  canvas.setClipRect(x, y, w, h);
+  drawFrame();
+  canvas.clearClipRect();
+  M5.Display.setClipRect(x, y, w, h);
+  M5.Display.startWrite();
+  canvas.pushSprite(0, 0);
+  M5.Display.endWrite();
+  M5.Display.clearClipRect();
+#ifdef NURSERYPAD_PROFILE
+  profRectUs += micros() - t0;
+  profRectN++;
+#endif
 }
 
 // ---------------- actions ----------------
@@ -1354,56 +1491,103 @@ void doAction(int a) {
   dirty = true;
 }
 // ---------------- touch ----------------
-// Precedence: wake a dimmed screen, then the hit under the finger. Buttons light on press and
-// fire on release while the finger is still over them; Dashboard's 600 ms hold toggles the lamp.
+// Precedence: wake a dimmed screen, then the control under the finger. A control lights on press
+// and fires on release. The press stays armed while the finger stays within CANCEL_SLOP of the
+// control and re-arms if it comes back, which is what a phone does; the old rule demanded the
+// release land within 12 px of the control and silently ate an ordinary thumb roll.
 void serviceTouch() {
   auto t = M5.Touch.getDetail();
   if (t.wasPressed()) {
     lastTouch = touchAt = millis();
-    pressX = t.x;
-    pressY = t.y;
+    pressX = moveX = t.x;
+    pressY = moveY = t.y;
     longFired = false;
     swallowTouch = false;
+    nightWakeUntil = millis() + 15000;
     if (nightDimActive) {
-      nightWakeUntil = millis() + 15000;
       swallowTouch = true;
-      pressedId = 0;
+      armedId = 0;
+      setPressed(0);
+      dirty = true; // the screen comes back up out of the dim
     } else {
-      nightWakeUntil = millis() + 15000;
-      pressedId = hitAt(t.x, t.y);
-      if (pressedId > 0)
+      armedId = hitAt(t.x, t.y);
+      setPressed(armedId > 0 ? armedId : 0);
+      if (armedId > 0)
         buzz(12);
     }
-    dirty = true;
   }
-  if (t.isPressed() && !swallowTouch && !longFired && screen == DASHBOARD && millis() - touchAt >= 600) {
-    longFired = true;
-    pressedId = 0;
-    toggleLamp();
+  if (t.isPressed() && !swallowTouch && !longFired) {
+    if (t.x >= 0 && t.y >= 0) {
+      moveX = t.x;
+      moveY = t.y;
+    }
+    if (screen == DASHBOARD && millis() - touchAt >= 600) {
+      longFired = true;
+      armedId = 0;
+      setPressed(0);
+      toggleLamp();
+    } else if (armedId > 0)
+      setPressed(stillOn(armedId, moveX, moveY) ? armedId : 0);
   }
   if (t.wasReleased()) {
-    int id = pressedId;
-    pressedId = 0;
-    dirty = true;
+    int id = armedId;
+    armedId = 0;
+    setPressed(0);
     if (swallowTouch || longFired)
       return;
     // Dashboard pages: a horizontal swipe moves status -> stats -> lamp -> status.
-    if (screen == DASHBOARD && abs(t.x - pressX) > 70 && abs(t.y - pressY) < 60) {
-      setPage((Page)(((int)page + (t.x < pressX ? 1 : 2)) % 3));
+    if (screen == DASHBOARD && abs(moveX - pressX) > 70 && abs(moveY - pressY) < 60) {
+      setPage((Page)(((int)page + (moveX < pressX ? 1 : 2)) % 3));
       buzz(12, 70);
       return;
     }
-    if (id <= 0)
-      return;
-    int again = hitAt(t.x, t.y, 12);
-    if (again == id || t.x < 0 || t.y < 0)
+    if (id > 0 && stillOn(id, moveX, moveY))
       doAction(id);
   }
+}
+/** The three capacitive dots below the glass. M5Unified raises these for any touch at y >= 240,
+ *  and still delivers that touch; hitAt refuses those rows so one contact cannot do two things. */
+void serviceButtons() {
+  if (M5.BtnA.wasPressed()) {
+    if (nightDimActive)
+      nightWakeUntil = millis() + 15000;
+    else if (screen == DASHBOARD || screen == HUB)
+      navigate(HUB);
+    else
+      navigate(backOf(screen));
+  }
+  if (M5.BtnB.wasPressed()) {
+    if (nightDimActive)
+      nightWakeUntil = millis() + 15000;
+    else
+      navigate(HUB);
+  }
+  if (M5.BtnC.wasPressed()) {
+    if (nightDimActive)
+      nightWakeUntil = millis() + 15000;
+    else {
+      navigate(DASHBOARD);
+      page = PAGE_STATUS;
+    }
+  }
+}
+/** One input sample. Called at the top of the loop and again the instant a repaint finishes, so
+ *  a frame's worth of pixels costs at most one missed sample rather than a whole gesture. */
+void serviceInput() {
+  M5.update();
+  serviceTouch();
+  serviceButtons();
+#ifdef NURSERYPAD_PROFILE
+  profSampled();
+#endif
 }
 
 void setup() {
   auto cfg = M5.config();
   M5.begin(cfg);
+#ifdef NURSERYPAD_PROFILE
+  Serial.begin(115200);
+#endif
   M5.Display.setRotation(1);
   M5.Display.setBrightness(BRIGHT_DAY);
   brightness = BRIGHT_DAY;
@@ -1439,7 +1623,7 @@ void setup() {
   render();
 }
 void loop() {
-  M5.update();
+  serviceInput();
   serviceVibe();
   serviceSong();
   NetResult result;
@@ -1461,29 +1645,6 @@ void loop() {
       playingSong < 0 && page != PAGE_LAMP && (int32_t)(millis() - cryNextLoopMs) >= 0) {
     playSong(SONG_STORMS);
     cryNextLoopMs = millis() + 5500;
-  }
-  serviceTouch();
-  if (M5.BtnA.wasPressed()) {
-    if (nightDimActive)
-      nightWakeUntil = millis() + 15000;
-    else if (screen == DASHBOARD || screen == HUB)
-      navigate(HUB);
-    else
-      navigate(backOf(screen));
-  }
-  if (M5.BtnB.wasPressed()) {
-    if (nightDimActive)
-      nightWakeUntil = millis() + 15000;
-    else
-      navigate(HUB);
-  }
-  if (M5.BtnC.wasPressed()) {
-    if (nightDimActive)
-      nightWakeUntil = millis() + 15000;
-    else {
-      navigate(DASHBOARD);
-      page = PAGE_STATUS;
-    }
   }
   bool form = screen == BOTTLE || screen == CHANGE_DIAPER || screen == PUMP_AMOUNT || screen == FEED || screen == REVIEW;
   if (screen != HUB && screen != DASHBOARD && millis() - lastTouch > (form ? 120000UL : 45000UL))
@@ -1508,9 +1669,12 @@ void loop() {
   }
   bool animating = ds == DS_CRYING && (screen == DASHBOARD ? page == PAGE_STATUS && !nightDimActive : !cryAcked);
   if (dirty || (int32_t)(millis() - nextDraw) >= 0) {
-    dirty = false;
     render();
-    nextDraw = millis() + (animating ? 80 : 500);
+    nextDraw = millis() + (animating ? 120 : 500);
+    serviceInput(); // a full frame is the longest the panel goes unwatched; sample the moment it ends
+  } else if (dirtyRect) {
+    renderRect(dirtyX, dirtyY, dirtyW, dirtyH);
+    serviceInput();
   }
-  delay(5);
+  delay(2); // the touch controller will not report faster than every 4 ms; match it
 }
