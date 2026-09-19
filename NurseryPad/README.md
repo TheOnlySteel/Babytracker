@@ -30,7 +30,7 @@ The bundled public trust anchors are GTS Root R4 and ISRG Root X1. Certificate v
 
 A / top-left: Home/back. B: Home. C / crib circle: Dashboard. Swipe the dashboard to move among status, stats, and lamp pages. Tap the status word to replay its chime, tap the lamp to peek at its numbers, or hold for 600 ms to toggle lamp mode. The top-left speaker cycles volume and plays a confirmation motif. A tap first wakes a dimmed screen or silences an active cry; that tap does not also navigate. Forms retain their amount/toggle drafts when they time out to Home.
 
-The ten LEDs in the M5GO Battery Bottom 2 mirror crib state with a low, breathing Hyrule-palette glow. Pending writes chase in gold; Wi-Fi loss shows an amber fairy and errors show red. Night brightness is tightly capped, and FastLED has a 300 mA power ceiling. The 500 mAh battery module needs no firmware configuration and contributes to the Core2's reported combined battery level.
+The ten LEDs in the M5GO Battery Bottom 2 mirror crib state with a low, breathing Hyrule-palette glow. Pending writes chase in gold; Wi-Fi loss shows an amber fairy and errors show red. Night brightness is tightly capped, and FastLED has a 300 mA power ceiling. Neither the Bottom2's 500 mAh cell nor the stacked 750 mAh battery module (1250 mAh of add-on capacity) needs firmware configuration; both sit in parallel with the Core2's own cell, so the reported battery level is that of the combined pack.
 
 The caregiver chip cycles the household's caregivers. It controls attribution; the device key controls authentication. Settings controls the device's default boot mode; a local dashboard/lamp toggle persists until that server setting changes.
 
