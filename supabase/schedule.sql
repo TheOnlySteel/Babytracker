@@ -1,3 +1,6 @@
+-- Extensions, enabled once on the live project (not a migration: PGlite cannot load them):
+--   create extension if not exists pg_cron with schema pg_catalog;
+--   create extension if not exists pg_net with schema extensions;
 -- Run AFTER deploying cradlewise-poll and stopping the standalone monitors.
 -- Vault secrets: cradlewise_poll_url (full Edge Function URL), cradlewise_scheduler_secret.
 -- Both this scheduler and the function use the same secret. No secret in source or cron text.

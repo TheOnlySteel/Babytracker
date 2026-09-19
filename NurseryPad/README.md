@@ -2,16 +2,16 @@
 
 M5Stack Core2 firmware for the BabyTracker integration. All device RPCs are POST requests to Supabase. The device has no Cradlewise credential and never calls Cradlewise directly.
 
-## Compile
+## Compile and flash
 
 Pinned versions (also in `.github/workflows/firmware.yml`):
 
-- arduino-cli 1.3.1
-- esp32:esp32 3.3.1
+- arduino-cli 1.3.1 (or the Arduino IDE with the same board and library versions)
+- esp32:esp32 3.3.1, board **M5Stack Core2**
 - M5Unified 0.2.22
 - M5GFX 0.2.29
-- ArduinoJson 6.21.5
-- FastLED 3.10.3
+- ArduinoJson **6.21.5** (the sketch uses the version 6 API; version 7 does not build it)
+- FastLED 3.10.3 (the M5GO Bottom2 LEDs)
 
 ```sh
 arduino-cli config init
@@ -19,53 +19,65 @@ arduino-cli config add board_manager.additional_urls https://espressif.github.io
 arduino-cli core update-index
 arduino-cli core install esp32:esp32@3.3.1
 arduino-cli lib install M5GFX@0.2.29 M5Unified@0.2.22 ArduinoJson@6.21.5 FastLED@3.10.3
-cp NurseryPad/secrets.example.h NurseryPad/secrets.h
-# Fill the ignored file with the pairing key, public anon key, Wi-Fi, URL and timezone.
+cp NurseryPad/secrets.example.h NurseryPad/secrets.h   # fill in; the copy is git-ignored
 arduino-cli compile --fqbn esp32:esp32:m5stack_core2 NurseryPad
+arduino-cli upload  --fqbn esp32:esp32:m5stack_core2 -p /dev/cu.usbserial-XXXX NurseryPad
 ```
+
+`secrets.h` needs the Wi-Fi credentials, the project URL (`https://<ref>.supabase.co`), the public anon key, a device key from Settings → Pair device in the web app (shown once), and the POSIX `TZ_STRING`.
 
 The bundled public trust anchors are GTS Root R4 and ISRG Root X1. Certificate validation is mandatory. Verify the actual project chain from a board before using the monitor.
 
-## Controls
+## Files
 
-A / top-left: Home/back. B: Home. C / crib circle: Dashboard. Swipe the dashboard to move among status, stats, and lamp pages. Tap the status word to replay its chime, tap the lamp to peek at its numbers, or hold for 600 ms to toggle lamp mode. The top-left speaker cycles volume and plays a confirmation motif. A tap first wakes a dimmed screen or silences an active cry; that tap does not also navigate. Forms retain their amount/toggle drafts when they time out to Home.
+- `NurseryPad.ino` is a stub that includes `app.h`. Keeping the program in a header means the Arduino builder never generates prototypes for it, so it builds the same under the IDE, arduino-cli and CI.
+- `ui.h`: design tokens (palette, type scale, spacing) taken from the design canvas at half scale, text and widget helpers, hit-area registry, icons, formatting.
+- `dashboard.h`: chimes, haptics, derived crib state, and the Dashboard-mode renderers (status, dimmed night, lamp), from CradleWatch.
+- `m5go_leds.h`: the ten LEDs in the M5GO Battery Bottom 2 on GPIO 25, driven with FastLED at a capped, non-blocking 25 fps.
+- `app.h`: state, transport task, write queue, response handling, the pad screens, input, `setup()` and `loop()`.
 
-The ten LEDs in the M5GO Battery Bottom 2 mirror crib state with a low, breathing Hyrule-palette glow. Pending writes chase in gold; Wi-Fi loss shows an amber fairy and errors show red. Night brightness is tightly capped, and FastLED has a 300 mA power ceiling. Neither the Bottom2's 500 mAh cell nor the stacked 750 mAh battery module (1250 mAh of add-on capacity) needs firmware configuration; the stock base and its 390 mAh cell are gone, so the reported battery level is that of the 1250 mAh pack.
+## Screens
 
-The caregiver chip cycles the household's caregivers. It controls attribution; the device key controls authentication. Settings controls the device's default boot mode; a local dashboard/lamp toggle persists until that server setting changes.
+Every pad screen has the same 36 px top bar: Back (except on the hub), the title (the child's name on the hub), the clock, the caregiver chip (tap to switch who is logging) and the crib-state circle. **The circle opens Dashboard mode from any screen.** A red dot beside the clock means writes are waiting to sync.
 
-Stop saves the timer immediately. Feed Done provides versioned Delete or Done. After stopping a pump, enter its total amount; saving that amount updates the completed row without changing the stop time. Sleep End locks automatic timing; Not a nap keeps the source-key tombstone.
+- **Hub**: one line of state (crib, last feed, last change) and four tiles: FEED, CHANGE, PUMP, SLEEP, each with its most recent event.
+- **Feed**: LEFT and RIGHT start a breastfeed; the BOTTLE row below opens the bottle form. The timer shows the active side, the running total and per-side totals, with SWITCH and STOP. Stop commits; the confirmation shows the totals with Delete (versioned) and DONE.
+- **Bottle**: minus / amount / plus in **5 ml** steps, Breast milk or Formula, SAVE. Starts from the last bottle's amount.
+- **Change**: WET, DIRTY, BOTH. One tap saves and returns to the hub with an UNDO toast (5 s). The most recent kind is highlighted with its age.
+- **Pump**: START PUMP; the timer has STOP; the amount screen asks for the total in 5 ml steps with Skip and SAVE.
+- **Sleep**: LOG and STATS tabs. Log shows the automatic crib nap (End now, Not a nap) or START NAP / STOP NAP for naps outside the crib, then today's sleeps. Stats is a 3×2 grid: total sleep, naps, longest nap, night sleep, wakings, awake in bed, with rise and bed times and the crib data age.
+- **Timer strip**: while a breastfeed, pump or nap runs and its own screen is not open, a strip along the bottom shows it with a STOP button; tapping the strip opens the timer.
+- **Review**: reached by tapping an amber notice line. Shows a refused log or a timer operation that needs a decision, with Refresh, Retry and Discard.
+- **Crying**: on any pad screen a live crying state takes over the screen with the pulsing ring until tapped once; the chime loops until then.
 
-Bottle/diaper logs persist before “Saved locally” appears. A new bottle form starts with the snapshot's recent bottle amount; polling and returning Home preserve an existing draft until it is saved locally. Eight logs can wait offline; a ninth is refused. No write is accepted before NTP has synchronized since boot. Timer operations require a recent snapshot and an empty one-shot queue. An uncertain timer request is retained with its operation ID until a definitive response, including across reboot. This is retry protection for one operation, not an offline timer chain.
+**Dashboard mode** is the CradleWatch screen: the whole display is the crib state with the word, how long, and the day's log line along the bottom. Speaker top-left cycles the volume and plays a confirmation motif at the new level; the home circle top-right returns to the hub; tapping the state word replays its chime; a tap anywhere else also returns home; a 600 ms hold toggles the lamp. A horizontal swipe moves between the three dashboard pages, status, today's sleep numbers, and the lamp, shown by the dots at the bottom. On the lamp a tap peeks at the numbers and a hold returns to the status page. Settled night sleep in the bed-to-rise window dims to the night screen after 15 s without touch.
 
-Failed logs remain visible. Tap the warning to refresh/retry the same operation. A definitive timer conflict can be acknowledged after reviewing the current log; a one-shot log is removed only after `applied` or `duplicate`. If stored queue data is malformed, logging stops so it cannot overwrite the unresolved queue.
+**Lights.** The Bottom2's ten LEDs breathe in the crib state's colour, low and slow, capped lower in the night window with a 300 mA power ceiling. Pending writes chase in gold, Wi-Fi loss shows a moving amber point, and a device error shows red.
 
-The source's observation timestamp controls stale warnings, even when snapshots are fresh. Past 15 minutes (or a source error), the lamp is neutral. “Settled” uses observed crib states, not editable sleep-entry duration.
+Physical buttons: A is Back, B is Home, C is Dashboard. Sub-screens return to the hub after 45 s idle (2 min on forms, drafts kept); Dashboard never times out.
+
+## Input model
+
+Every tappable element registers its rectangle while it is drawn; nothing is smaller than 44 px. A press highlights the element and buzzes; the action fires on release while the finger is still over it, so a slip cancels. A press on a disabled control is swallowed. Precedence: waking a dimmed screen, then the element under the finger. The frame is one full-screen sprite pushed inside a single display write, in internal RAM when that leaves TLS and JSON their room, else in PSRAM. Brightness is written to the PMIC only when it changes, since it shares the touch controller's I2C bus.
+
+## Behaviour that matters
+
+Stop saves the timer immediately. Feed Done offers versioned Delete or Done. After stopping a pump, enter its total amount; saving updates the completed row without changing the stop time. Sleep End locks automatic timing; Not a nap keeps the source-key tombstone.
+
+Bottle and diaper logs persist locally before the toast appears and flush in order; eight can wait offline and a ninth is refused. UNDO on the toast removes the log from the queue if it has not been sent, or deletes the row the server created if it has. No timer operation is accepted before NTP has synchronized since boot; bottle and diaper logs may be queued before that and are timestamped at receipt with `time_uncertain`. Timer operations require a recent snapshot and an empty one-shot queue. An uncertain timer request is retained with its operation ID until a definitive response, including across reboot. A refused one-shot log is parked for review so the logs behind it still flush; transient failures back off from 15 s to 5 min.
+
+The caregiver chip controls attribution; the device key controls authentication. The source's observation timestamp drives stale warnings; past 15 minutes the crib circle goes hollow and the lamp goes neutral. "Settled" uses observed crib states, not editable sleep-entry duration.
 
 ## Physical release gate
 
-Compilation does not verify touchscreen coordinates, sound level, Wi-Fi/certificate behavior, flash durability or concurrent use by two real devices. Execute the checks in `docs/implementation-handoff.md` before replacing the live nursery monitors.
+Compilation does not verify touchscreen coordinates, sound level, Wi-Fi and certificate behaviour, flash durability or concurrent use by two real devices. Execute the checks in `docs/rollout.md` step 10 before replacing the live nursery monitors.
 
-## Status and known gaps (2026-09-18)
+## Status and known gaps (2026-09-19)
 
-Reviewed and corrected before commit: the response buffer is no longer read after it is freed; a
-refused one-shot log is parked for review instead of wedging the queue, transient failures back
-off (15 s → 5 min) instead of stopping, timer buttons stay disabled until a snapshot newer than
-the last timer op arrives, bottle and diaper logs may be queued before NTP sync (the server
-stamps them at receipt and marks them `time_uncertain`), and the stale banner reads
-"unavailable" until the first observation.
+The 2026-09-18 build had 32 px targets, actions on press without feedback, three type sizes on one screen and a bottom message banner that hid content; it was replaced by the screens above, which follow the design canvas (https://claude.ai/artifact/97CjRPpawvbcUEZ2h5q6he) at half scale. Verified here: a clean compile with all warnings on. Not verified here: anything on a board. Still to do:
 
-The September 18 polish pass also adds the M5GO Bottom 2 light engine, a Hyrule-inspired
-16-colour/pixel-panel treatment, working dashboard swipes, the stats page, lamp peek, state-chime
-replay, and audible volume confirmation.
-
-Still to do before this replaces the standalone CradleWatch unit:
-
-- Complete the screen flow: put the timer strip on the bottom edge, make Change three one-tap
-  columns with an undo toast, and show the dedicated boot screen while the first snapshot loads.
-- Add daytime calm dimming to match the dashboard's existing night dimming.
-- Bundle GTS Root R1 next to R4 and ISRG X1 after confirming the chain the board actually sees
-  (`openssl s_client -connect <project>.supabase.co:443 -showcerts`); keep the CA that last
-  succeeded instead of retrying from the first on every request.
+- The feed screen cannot suggest the next side; the snapshot does not carry the last side yet.
+- Restore the remaining CradleWatch niceties the fork dropped: the daytime calm dim and the boot screen.
+- Bundle GTS Root R1 next to R4 and ISRG X1 after confirming the chain the board actually sees (`openssl s_client -connect <project>.supabase.co:443 -showcerts`); keep the CA that last succeeded instead of retrying from the first on every request.
 - Store the outbox as per-slot keys or bytes rather than one NVS string.
-- Physical checks on two units per `docs/rollout.md` step 10. A CI compile is not a hardware test.
+- Physical checks on two units per `docs/rollout.md` step 10.
