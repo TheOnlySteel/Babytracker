@@ -31,10 +31,19 @@ The bundled public trust anchors are GTS Root R4 and ISRG Root X1. Certificate v
 ## Files
 
 - `NurseryPad.ino` is a stub that includes `app.h`. Keeping the program in a header means the Arduino builder never generates prototypes for it, so it builds the same under the IDE, arduino-cli and CI.
-- `ui.h`: design tokens (palette, type scale, spacing) taken from the design canvas at half scale, text and widget helpers, hit-area registry, icons, formatting.
+- `ui.h`: design tokens (palette, type scale, spacing), text and widget helpers, hit-area registry, glyphs, formatting.
+- `pixel_art.h`: generated. The care and navigation sprites from the 2026-09-19 pixel design package, converted from its one-rect-per-pixel SVGs into indexed 16-colour bitmaps with a shared palette. Index 0 is transparent. The package's woodland scenery is deliberately not included.
 - `dashboard.h`: chimes, haptics, derived crib state, and the Dashboard-mode renderers (status, dimmed night, lamp), from CradleWatch.
 - `m5go_leds.h`: the ten LEDs in the M5GO Battery Bottom 2 on GPIO 25, driven with FastLED at a capped, non-blocking 25 fps.
 - `app.h`: state, transport task, write queue, response handling, the pad screens, input, `setup()` and `loop()`.
+
+## Look
+
+The interface is a 16-bit console menu. Surfaces are hard-edged boxes with a gold frame, a light bevel along the top-left, a dark one along the bottom-right, and a hard offset shadow; pressing one sinks the bevel and lights the frame gold. The field behind them is a deep green with a quiet stipple, so it reads as tiled rather than blank. Nothing is rounded and nothing is anti-aliased.
+
+Type is two bitmap faces on a single 8 px grid, used only at integer scales: an 8x8 face for captions and the dashboard state word, an 8x16 face for titles, labels, stat values and timers. Both are ASCII only, so `SEP` stands in for the typographic separator the old face could draw. Glyphs are a fixed 8 px wide, which is wider than the proportional face this replaced, so every string that shares a row with another is measured rather than assumed, and a few captions were shortened to fit their cell rather than be truncated mid-word.
+
+The palette is the design package's: deep green, midnight blue, antique gold, warm cream, moss, terracotta, water blue. Crib states keep an explicit word next to the colour. Artwork is blitted from `pixel_art.h` at 1x or 2x depending on the space. Interface chrome is square, including the crib-state gem and the page pips; the lamp and night-mode glows stay circular because they are light, not furniture.
 
 ## Screens
 
@@ -58,7 +67,11 @@ Physical buttons: A is Back, B is Home, C is Dashboard. Sub-screens return to th
 
 ## Input model
 
-Every tappable element registers its rectangle while it is drawn; nothing is smaller than 44 px. A press highlights the element and buzzes; the action fires on release while the finger is still over it, so a slip cancels. A press on a disabled control is swallowed. Precedence: waking a dimmed screen, then the element under the finger. The frame is one full-screen sprite pushed inside a single display write, in internal RAM when that leaves TLS and JSON their room, else in PSRAM. Brightness is written to the PMIC only when it changes, since it shares the touch controller's I2C bus.
+Every tappable element registers two rectangles while it is drawn: the one it drew, and that one grown to 44 px. A press inside a drawn rectangle takes it outright; a near miss goes to the nearest centre rather than to whatever was drawn last. The top bar and the timer strip own their rows, and nothing drawn in the body may grow into them, so a short control sitting flush under the bar cannot steal the Back chevron's lower half. Touches at y >= 240 are left to buttons A, B and C, which is what M5Unified raises there; they never also fire a screen control.
+
+A press highlights the element and buzzes. It stays armed while the finger stays within 22 px of the element and re-arms if the finger comes back, so an ordinary thumb roll no longer eats the tap; it fires on release and is abandoned if the element has left the screen meanwhile. A press on a disabled control is swallowed. Precedence: waking a dimmed screen, then the element under the finger.
+
+The frame is one full-screen sprite, in internal RAM when that leaves TLS and JSON their room, else in PSRAM. A change confined to one control repaints and transfers only that rectangle, since `pushImage` clips before it transfers, and the stepper's plus and minus mark just their own row rather than the whole frame; a full 320x240 push is about 31 ms of SPI time by itself, and the panel cannot see the finger while it happens. Input is sampled at the top of the loop and again the instant a repaint ends, so a frame costs at most one sample rather than a gesture. Build with `-DNURSERYPAD_PROFILE` to print frame times and the worst input gap to serial at 115200. Brightness is written to the PMIC only when it changes, since it shares the touch controller's I2C bus.
 
 ## Behaviour that matters
 
@@ -74,10 +87,13 @@ Compilation does not verify touchscreen coordinates, sound level, Wi-Fi and cert
 
 ## Status and known gaps (2026-09-19)
 
-The 2026-09-18 build had 32 px targets, actions on press without feedback, three type sizes on one screen and a bottom message banner that hid content; it was replaced by the screens above, which follow the design canvas (https://claude.ai/artifact/97CjRPpawvbcUEZ2h5q6he) at half scale. Verified here: a clean compile with all warnings on. Not verified here: anything on a board. Still to do:
+The 2026-09-18 build had 32 px targets, actions on press without feedback, three type sizes on one screen and a bottom message banner that hid content; it was replaced by the screens above, which follow the design canvas (https://claude.ai/artifact/97CjRPpawvbcUEZ2h5q6he) at half scale. The screens that replaced it still resolved a touch by draw order, which let the body's first control take the bottom rows of the top bar: on Sleep the tab strip owned 14 of the bar's 36 rows, so the lower half of the Back chevron selected a tab and the crib circle opened Stats. The input model above is the fix. Verified here: a clean compile with all warnings on, and the hit table simulated off the shipped `hit`/`hitAt` code to confirm the bar keeps all 44 of its rows on every screen. Not verified here: anything on a board, including the frame times the profile build reports. Still to do:
 
 - The feed screen cannot suggest the next side; the snapshot does not carry the last side yet.
 - Restore the remaining CradleWatch niceties the fork dropped: the daytime calm dim and the boot screen.
 - Bundle GTS Root R1 next to R4 and ISRG X1 after confirming the chain the board actually sees (`openssl s_client -connect <project>.supabase.co:443 -showcerts`); keep the CA that last succeeded instead of retrying from the first on every request.
 - Store the outbox as per-slot keys or bytes rather than one NVS string.
+- Measure the frame with the profile build before deciding whether the sprite is worth keeping. Drawing straight to the panel, with a sprite only for the lamp gradient and the crying overlay, is the remaining structural win and would retire the PSRAM question.
 - Physical checks on two units per `docs/rollout.md` step 10.
+- Judge the pixel type on the panel. The layout was checked against the real glyph bitmaps and the real sprite data, but an 8 px bitmap face at arm's length in a dark room is a legibility question a simulator cannot answer.
+- Carry the same visual language into the phone app, which the design package also covers and this change does not touch.
