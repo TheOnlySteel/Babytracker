@@ -1280,9 +1280,19 @@ void logDiaper(bool wet, bool dirty) {
   navigate(HUB);
   toast(String(wet && dirty ? "Wet + dirty" : wet ? "Wet" : "Dirty") + " diaper logged", true);
 }
+/** Marks the stepper's row: its two buttons and the amount between them. Holding minus or plus
+ *  is the most repeated gesture in the app and has no business repainting the whole frame. */
+bool markStepperRow() {
+  int x, y, w, h;
+  if (!hitRect(A_MINUS, x, y, w, h))
+    return false;
+  markRect(0, y - 12, SCR_W, h + 48);
+  return true;
+}
 void doAction(int a) {
   DynamicJsonDocument args(256);
   JsonObject obj = args.to<JsonObject>();
+  bool whole = true; // cleared by an action that has already marked what it changed
   switch (a) {
   case A_BACK:
     navigate(backOf(screen));
@@ -1367,12 +1377,14 @@ void doAction(int a) {
       amount = max(5, amount - 5);
     else
       pumpAmount = max(0, pumpAmount - 5);
+    whole = !markStepperRow();
     break;
   case A_PLUS:
     if (screen == BOTTLE)
       amount = min(1000, amount + 5);
     else
       pumpAmount = min(2000, pumpAmount + 5);
+    whole = !markStepperRow();
     break;
   case A_BREAST:
     formula = false;
@@ -1488,7 +1500,8 @@ void doAction(int a) {
       navigate(HUB);
     break;
   }
-  dirty = true;
+  if (whole)
+    dirty = true;
 }
 // ---------------- touch ----------------
 // Precedence: wake a dimmed screen, then the control under the finger. A control lights on press

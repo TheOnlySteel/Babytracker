@@ -62,7 +62,7 @@ Every tappable element registers two rectangles while it is drawn: the one it dr
 
 A press highlights the element and buzzes. It stays armed while the finger stays within 22 px of the element and re-arms if the finger comes back, so an ordinary thumb roll no longer eats the tap; it fires on release and is abandoned if the element has left the screen meanwhile. A press on a disabled control is swallowed. Precedence: waking a dimmed screen, then the element under the finger.
 
-The frame is one full-screen sprite, in internal RAM when that leaves TLS and JSON their room, else in PSRAM. A change confined to one control repaints and transfers only that rectangle, since `pushImage` clips before it transfers; a full 320x240 push is about 31 ms of SPI time by itself, and the panel cannot see the finger while it happens. Input is sampled at the top of the loop and again the instant a repaint ends, so a frame costs at most one sample rather than a gesture. Build with `-DNURSERYPAD_PROFILE` to print frame times and the worst input gap to serial at 115200. Brightness is written to the PMIC only when it changes, since it shares the touch controller's I2C bus.
+The frame is one full-screen sprite, in internal RAM when that leaves TLS and JSON their room, else in PSRAM. A change confined to one control repaints and transfers only that rectangle, since `pushImage` clips before it transfers, and the stepper's plus and minus mark just their own row rather than the whole frame; a full 320x240 push is about 31 ms of SPI time by itself, and the panel cannot see the finger while it happens. Input is sampled at the top of the loop and again the instant a repaint ends, so a frame costs at most one sample rather than a gesture. Build with `-DNURSERYPAD_PROFILE` to print frame times and the worst input gap to serial at 115200. Brightness is written to the PMIC only when it changes, since it shares the touch controller's I2C bus.
 
 ## Behaviour that matters
 
@@ -84,6 +84,5 @@ The 2026-09-18 build had 32 px targets, actions on press without feedback, three
 - Restore the remaining CradleWatch niceties the fork dropped: the daytime calm dim and the boot screen.
 - Bundle GTS Root R1 next to R4 and ISRG X1 after confirming the chain the board actually sees (`openssl s_client -connect <project>.supabase.co:443 -showcerts`); keep the CA that last succeeded instead of retrying from the first on every request.
 - Store the outbox as per-slot keys or bytes rather than one NVS string.
-- Repaint only the control a stepper tap changed. Every action still marks the whole frame dirty, so holding minus or plus costs a full repaint per 5 ml.
 - Measure the frame with the profile build before deciding whether the sprite is worth keeping. Drawing straight to the panel, with a sprite only for the lamp gradient and the crying overlay, is the remaining structural win and would retire the PSRAM question.
 - Physical checks on two units per `docs/rollout.md` step 10.
