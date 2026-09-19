@@ -1,25 +1,25 @@
 // Adapted from CradleWatch: palette, sounds, haptics and renderers. No network calls.
 #pragma once
-// ---------------- palette (RGB565), from the design mockups ----------------
+// ---------------- 16-colour Hyrule-inspired pixel palette (RGB565) ----------------
 static constexpr uint16_t rgb565(uint8_t r, uint8_t g, uint8_t b) {
   return (uint16_t)(((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3));
 }
-const uint16_t COL_GREEN = rgb565(15, 138, 78);
-const uint16_t COL_YELLOW = rgb565(227, 168, 11);
-const uint16_t COL_ORANGE = rgb565(226, 96, 27);
-const uint16_t COL_RED = rgb565(212, 43, 43);
-const uint16_t COL_AWAYBG = rgb565(38, 48, 62);
-const uint16_t COL_AWAYTX = rgb565(175, 194, 216);
-const uint16_t COL_DARK = rgb565(12, 12, 16);  // stats page background
-const uint16_t COL_PANEL = rgb565(24, 24, 28); // stats tiles
-const uint16_t COL_DIM = rgb565(140, 140, 148);
-const uint16_t COL_FAINT = rgb565(60, 60, 66);
-const uint16_t COL_WHITE = rgb565(245, 245, 245);
-const uint16_t COL_YELTX = rgb565(33, 25, 0);     // dark text on yellow
-const uint16_t COL_AMBER = rgb565(255, 210, 122); // stale-banner text
-const uint16_t COL_BANNER = rgb565(38, 38, 38);
-const uint16_t COL_NIGHT = rgb565(46, 143, 94); // night-mode text
-const uint16_t COL_NIGHTDOT = rgb565(53, 199, 127);
+const uint16_t COL_GREEN = rgb565(40, 128, 72);    // Kokiri tunic
+const uint16_t COL_YELLOW = rgb565(248, 184, 40);  // Triforce gold
+const uint16_t COL_ORANGE = rgb565(216, 112, 32);  // torch
+const uint16_t COL_RED = rgb565(184, 48, 48);      // heart
+const uint16_t COL_AWAYBG = rgb565(48, 64, 96);    // Dark World blue
+const uint16_t COL_AWAYTX = rgb565(152, 200, 208); // Zora ice
+const uint16_t COL_DARK = rgb565(24, 24, 40);      // dungeon night
+const uint16_t COL_PANEL = rgb565(48, 48, 64);     // stone tile
+const uint16_t COL_DIM = rgb565(168, 160, 136);    // weathered parchment
+const uint16_t COL_FAINT = rgb565(80, 72, 88);
+const uint16_t COL_WHITE = rgb565(248, 232, 200);  // fairy-light cream
+const uint16_t COL_YELTX = rgb565(48, 32, 16);
+const uint16_t COL_AMBER = rgb565(248, 200, 80);
+const uint16_t COL_BANNER = rgb565(64, 40, 56);
+const uint16_t COL_NIGHT = rgb565(72, 152, 104);
+const uint16_t COL_NIGHTDOT = rgb565(128, 216, 144);
 const uint16_t COL_BLACK = rgb565(0, 0, 0);
 
 uint16_t lerpCol(uint16_t a, uint16_t b, float t) {
@@ -353,6 +353,14 @@ void drawPageDots(uint16_t on, uint16_t off) {
   const int xs[3] = {280, 294, 308};
   for (int i = 0; i < 3; ++i)
     canvas.fillCircle(xs[i], 222, 3, (int)page == i ? on : off);
+}
+
+// A one-pixel highlight and shadow makes panels read like 16-bit-era menu tiles.
+void pixelPanel(int x, int y, int w, int h, uint16_t fill, uint16_t edge, uint16_t shadow) {
+  canvas.fillRect(x + 2, y + 2, w - 2, h - 2, shadow);
+  canvas.fillRect(x, y, w - 2, h - 2, fill);
+  canvas.drawFastHLine(x, y, w - 2, edge);
+  canvas.drawFastVLine(x, y, h - 2, edge);
 }
 
 // warning banner across the top; returns true if one was drawn

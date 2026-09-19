@@ -11,13 +11,14 @@ Pinned versions (also in `.github/workflows/firmware.yml`):
 - M5Unified 0.2.22
 - M5GFX 0.2.29
 - ArduinoJson 6.21.5
+- FastLED 3.10.3
 
 ```sh
 arduino-cli config init
 arduino-cli config add board_manager.additional_urls https://espressif.github.io/arduino-esp32/package_esp32_index.json
 arduino-cli core update-index
 arduino-cli core install esp32:esp32@3.3.1
-arduino-cli lib install M5GFX@0.2.29 M5Unified@0.2.22 ArduinoJson@6.21.5
+arduino-cli lib install M5GFX@0.2.29 M5Unified@0.2.22 ArduinoJson@6.21.5 FastLED@3.10.3
 cp NurseryPad/secrets.example.h NurseryPad/secrets.h
 # Fill the ignored file with the pairing key, public anon key, Wi-Fi, URL and timezone.
 arduino-cli compile --fqbn esp32:esp32:m5stack_core2 NurseryPad
@@ -27,7 +28,9 @@ The bundled public trust anchors are GTS Root R4 and ISRG Root X1. Certificate v
 
 ## Controls
 
-A / top-left: Home/back. B: Home. C / crib circle: Dashboard. A short dashboard tap returns home; a 600 ms hold toggles lamp mode. The top-left speaker cycles volume. A tap first wakes a dimmed screen or silences an active cry; that tap does not also navigate. Forms retain their amount/toggle drafts when they time out to Home.
+A / top-left: Home/back. B: Home. C / crib circle: Dashboard. Swipe the dashboard to move among status, stats, and lamp pages. Tap the status word to replay its chime, tap the lamp to peek at its numbers, or hold for 600 ms to toggle lamp mode. The top-left speaker cycles volume and plays a confirmation motif. A tap first wakes a dimmed screen or silences an active cry; that tap does not also navigate. Forms retain their amount/toggle drafts when they time out to Home.
+
+The ten LEDs in the M5GO Battery Bottom 2 mirror crib state with a low, breathing Hyrule-palette glow. Pending writes chase in gold; Wi-Fi loss shows an amber fairy and errors show red. Night brightness is tightly capped, and FastLED has a 300 mA power ceiling. Neither the Bottom2's 500 mAh cell nor the stacked 750 mAh battery module (1250 mAh of add-on capacity) needs firmware configuration; the stock base and its 390 mAh cell are gone, so the reported battery level is that of the 1250 mAh pack.
 
 The caregiver chip cycles the household's caregivers. It controls attribution; the device key controls authentication. Settings controls the device's default boot mode; a local dashboard/lamp toggle persists until that server setting changes.
 
@@ -52,13 +55,15 @@ the last timer op arrives, bottle and diaper logs may be queued before NTP sync 
 stamps them at receipt and marks them `time_uncertain`), and the stale banner reads
 "unavailable" until the first observation.
 
-Still to do, in a follow-up, before this replaces the standalone CradleWatch unit:
+The September 18 polish pass also adds the M5GO Bottom 2 light engine, a Hyrule-inspired
+16-colour/pixel-panel treatment, working dashboard swipes, the stats page, lamp peek, state-chime
+replay, and audible volume confirmation.
 
-- Bring the screens to the agreed design: 2×2 hub tiles with the crib-state circle top-right,
-  the timer strip along the bottom edge with proper labels, Change as three one-tap columns with
-  an undo toast, button A as Back.
-- Restore CradleWatch behaviours the fork dropped: lamp tap-to-peek, tap-the-word chime replay,
-  the volume blip, the daytime calm dim, the boot screen, a Wi-Fi-lost indication on pad screens.
+Still to do before this replaces the standalone CradleWatch unit:
+
+- Complete the screen flow: put the timer strip on the bottom edge, make Change three one-tap
+  columns with an undo toast, and show the dedicated boot screen while the first snapshot loads.
+- Add daytime calm dimming to match the dashboard's existing night dimming.
 - Bundle GTS Root R1 next to R4 and ISRG X1 after confirming the chain the board actually sees
   (`openssl s_client -connect <project>.supabase.co:443 -showcerts`); keep the CA that last
   succeeded instead of retrying from the first on every request.
