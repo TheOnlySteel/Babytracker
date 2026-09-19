@@ -7,6 +7,7 @@
 #include "secrets.h"
 #include "supabase_certs.h"
 #include <ArduinoJson.h>
+#include <FastLED.h>
 #include <HTTPClient.h>
 #include <M5Unified.h>
 #include <Preferences.h>
@@ -34,6 +35,7 @@ time_t nowEpoch() {
   return snapshotEpoch ? snapshotEpoch + (millis() - snapshotMs) / 1000 : 0;
 }
 #include "dashboard.h"
+#include "m5go_leds.h"
 
 // ---------------- state ----------------
 Screen screen = HUB;
@@ -53,7 +55,8 @@ String notice;                       // persistent problem line; tapping it open
 String toastText, undoOpId, undoRow; // transient confirmation and the one-shot log it can undo
 uint32_t toastUntil = 0;
 bool dirty = true; // a redraw is wanted before the next tick
-uint32_t nextDraw = 0, lastTouch = 0, nextPoll = 0, retryAt = 0, touchAt = 0, cribBlinkMs = 0;
+uint32_t nextDraw = 0, lastTouch = 0, nextPoll = 0, retryAt = 0, touchAt = 0;
+int pressX = 0, pressY = 0;
 bool longFired = false, swallowTouch = false;
 uint8_t brightness = 0;
 
@@ -896,6 +899,32 @@ void drawPumpAmount(int top, int bottom) {
 }
 /** Minutes as "0m", "45m", "1h 6m" for the stats grid. */
 String fmtMin(double minutes) { return minutes < 1 ? String("0m") : fmtDur((long)(minutes * 60)); }
+/** The 3x2 sleep grid with its rise/bed footer, shared by the Sleep tab and the dashboard. */
+void drawStatsGrid(int y, int bottom, uint16_t bg) {
+  {
+    struct Cell {
+      String n, cap;
+    } cells[6] = {{fmtMin(sleepStats["sleep_min"] | 0.0), "total sleep"},
+                  {String(sleepStats["naps"] | 0), "naps"},
+                  {fmtMin(sleepStats["longest_nap_min"] | 0.0), "longest nap"},
+                  {fmtMin(sleepStats["last_night_min"] | 0.0), "night sleep"},
+                  {String(sleepStats["last_night_wakings"] | 0), "wakings"},
+                  {sleepStats["awake_in_bed_s"].isNull() ? String("--") : fmtMin((sleepStats["awake_in_bed_s"] | 0.0) / 60),
+                   "awake in bed"}};
+    int fh = 18, gh = bottom - PAD - fh - y, ch = (gh - GAP) / 2, cw = (SCR_W - 2 * PAD - 2 * GAP) / 3;
+    for (int i = 0; i < 6; i++) {
+      int x = PAD + (i % 3) * (cw + GAP), yy = y + (i / 3) * (ch + GAP);
+      panel(x, yy, cw, ch, C_PANEL, C_BORDER);
+      text(cells[i].n, x + 10, yy + ch / 2 - 9, F_BIG, i == 0 ? C_BLUE : C_TEXT, C_PANEL,
+           lgfx::textdatum_t::middle_left);
+      text(cells[i].cap, x + 10, yy + ch / 2 + 14, F_SMALL, C_MUTED, C_PANEL, lgfx::textdatum_t::middle_left);
+    }
+    String foot = "rise " + metrics.rise + "  ·  bed " + metrics.bed;
+    if (sourceObserved)
+      foot += "  ·  crib data " + fmtAgo(sourceAge());
+    text(fit(foot, F_SMALL, SCR_W - 2 * PAD), PAD, bottom - PAD - 8, F_SMALL, C_MUTED, bg, lgfx::textdatum_t::middle_left);
+  }
+}
 /** Local "13:04" for an ISO timestamp; "now" when absent. */
 String hm(JsonVariant at) {
   time_t t = parseIso8601Utc(at | "");
@@ -966,29 +995,24 @@ void drawSleep(int top, int bottom) {
     if (!shown)
       text(sleepStats.isNull() || sleepStats.size() == 0 ? "loading today..." : "no sleep logged today", 160, y + 12, F_SMALL,
            C_MUTED, C_BG);
-  } else {
-    struct Cell {
-      String n, cap;
-    } cells[6] = {{fmtMin(sleepStats["sleep_min"] | 0.0), "total sleep"},
-                  {String(sleepStats["naps"] | 0), "naps"},
-                  {fmtMin(sleepStats["longest_nap_min"] | 0.0), "longest nap"},
-                  {fmtMin(sleepStats["last_night_min"] | 0.0), "night sleep"},
-                  {String(sleepStats["last_night_wakings"] | 0), "wakings"},
-                  {sleepStats["awake_in_bed_s"].isNull() ? String("--") : fmtMin((sleepStats["awake_in_bed_s"] | 0.0) / 60),
-                   "awake in bed"}};
-    int fh = 18, gh = bottom - PAD - fh - y, ch = (gh - GAP) / 2, cw = (SCR_W - 2 * PAD - 2 * GAP) / 3;
-    for (int i = 0; i < 6; i++) {
-      int x = PAD + (i % 3) * (cw + GAP), yy = y + (i / 3) * (ch + GAP);
-      panel(x, yy, cw, ch, C_PANEL, C_BORDER);
-      text(cells[i].n, x + 10, yy + ch / 2 - 9, F_BIG, i == 0 ? C_BLUE : C_TEXT, C_PANEL,
-           lgfx::textdatum_t::middle_left);
-      text(cells[i].cap, x + 10, yy + ch / 2 + 14, F_SMALL, C_MUTED, C_PANEL, lgfx::textdatum_t::middle_left);
-    }
-    String foot = "rise " + metrics.rise + "  ·  bed " + metrics.bed;
-    if (sourceObserved)
-      foot += "  ·  crib data " + fmtAgo(sourceAge());
-    text(fit(foot, F_SMALL, SCR_W - 2 * PAD), PAD, bottom - PAD - 8, F_SMALL, C_MUTED, C_BG, lgfx::textdatum_t::middle_left);
-  }
+  } else
+    drawStatsGrid(y, bottom, C_BG);
+}
+/** Dashboard page two: today's sleep numbers on the dark ground, same chrome as the status page. */
+void drawDashStats() {
+  canvas.fillScreen(C_BG);
+  hit(0, 0, SCR_W, SCR_H, A_DASH_TAP);
+  iconSpeaker(22, 18, C_MUTED, volIdx);
+  hit(0, 0, 44, BAR_H, A_VOL);
+  String banner = bannerText();
+  text(fit(banner.length() ? banner : "sleep today  ·  swipe for lamp", F_SMALL, 200), 160, 18, F_SMALL,
+       banner.length() ? C_AMBER : C_MUTED, C_BG);
+  canvas.fillCircle(298, 18, 13, C_MUTED);
+  canvas.fillCircle(298, 18, 11, C_BG);
+  iconHome(298, 18, C_MUTED);
+  hit(276, 0, 44, BAR_H, A_DASH_HOME);
+  drawStatsGrid(BAR_H + 4, SCR_H - 12, C_BG);
+  drawPageDots(C_TEXT, C_FAINT);
 }
 void drawReview(int top, int bottom) {
   bool refused = rejected.length();
@@ -1068,6 +1092,8 @@ void render() {
     dashFooter += String(dashFooter.length() ? "  ·  " : "") + "naps today " + String(naps);
     if (page == PAGE_LAMP)
       drawLampScreen();
+    else if (page == PAGE_STATS)
+      drawDashStats();
     else if (nightDimActive)
       drawNightScreen();
     else
@@ -1083,6 +1109,19 @@ void render() {
 }
 
 // ---------------- actions ----------------
+void setPage(Page next) {
+  page = next;
+  prefs.putString("boot", page == PAGE_LAMP ? "lamp" : "dashboard");
+  if (page == PAGE_STATS)
+    statsWanted = true;
+  nightWakeUntil = millis() + 15000;
+  dirty = true;
+}
+void toggleLamp() {
+  setPage(page == PAGE_LAMP ? PAGE_STATUS : PAGE_LAMP);
+  buzz(30);
+}
+
 void stopRunning(const char *timer) {
   if (String(timer) == "bf")
     action("bf_stop", "bf");
@@ -1113,7 +1152,7 @@ void doAction(int a) {
     break;
   case A_DASH:
     navigate(DASHBOARD);
-    page = PAGE_STATUS;
+    setPage(PAGE_STATUS);
     break;
   case A_CAREGIVER: {
     JsonArray cs = snapshot["caregivers"];
@@ -1293,7 +1332,10 @@ void doAction(int a) {
     if (isMuted())
       stopSong();
     else
-      buzz(10);
+      playSong(SONG_SARIA); // audible confirmation at the new level
+    break;
+  case A_DASH_WORD:
+    playSong(songForStatus(curStatus));
     break;
   case A_DASH_HOME:
     navigate(HUB);
@@ -1311,13 +1353,6 @@ void doAction(int a) {
   }
   dirty = true;
 }
-void toggleLamp() {
-  page = page == PAGE_LAMP ? PAGE_STATUS : PAGE_LAMP;
-  prefs.putString("boot", page == PAGE_LAMP ? "lamp" : "dashboard");
-  buzz(30);
-  dirty = true;
-}
-
 // ---------------- touch ----------------
 // Precedence: wake a dimmed screen, then the hit under the finger. Buttons light on press and
 // fire on release while the finger is still over them; Dashboard's 600 ms hold toggles the lamp.
@@ -1325,6 +1360,8 @@ void serviceTouch() {
   auto t = M5.Touch.getDetail();
   if (t.wasPressed()) {
     lastTouch = touchAt = millis();
+    pressX = t.x;
+    pressY = t.y;
     longFired = false;
     swallowTouch = false;
     if (nightDimActive) {
@@ -1348,7 +1385,15 @@ void serviceTouch() {
     int id = pressedId;
     pressedId = 0;
     dirty = true;
-    if (swallowTouch || longFired || id <= 0)
+    if (swallowTouch || longFired)
+      return;
+    // Dashboard pages: a horizontal swipe moves status -> stats -> lamp -> status.
+    if (screen == DASHBOARD && abs(t.x - pressX) > 70 && abs(t.y - pressY) < 60) {
+      setPage((Page)(((int)page + (t.x < pressX ? 1 : 2)) % 3));
+      buzz(12, 70);
+      return;
+    }
+    if (id <= 0)
       return;
     int again = hitAt(t.x, t.y, 12);
     if (again == id || t.x < 0 || t.y < 0)
@@ -1376,6 +1421,7 @@ void setup() {
     canvas.createSprite(SCR_W, SCR_H);
   }
   loadOutbox();
+  setupM5GoLeds();
   String boot = prefs.getString("boot", "hub");
   if (boot != "hub") {
     screen = DASHBOARD;
@@ -1449,6 +1495,7 @@ void loop() {
     dirty = true;
   }
   DisplayState ds = displayState();
+  serviceM5GoLeds(ds, pending || queued || timerPending.length(), failed, WiFi.status() == WL_CONNECTED, inNightWindow());
   nightDimActive = screen == DASHBOARD && page != PAGE_LAMP && ds == DS_ASLEEP && inNightWindow() &&
                    (int32_t)(millis() - nightWakeUntil) >= 0 && sourceAge() < 900 && !sourceError.length();
   uint8_t want = screen == DASHBOARD && page == PAGE_LAMP ? BRIGHT_LAMP

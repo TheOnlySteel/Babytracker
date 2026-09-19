@@ -251,6 +251,12 @@ String bannerText() {
   return "";
 }
 
+/** Three dots for the dashboard pages: status, stats, lamp. Swipe moves between them. */
+void drawPageDots(uint16_t on, uint16_t off) {
+  for (int i = 0; i < 3; ++i)
+    canvas.fillCircle(146 + i * 14, 234, 3, (int)page == i ? on : off);
+}
+
 /** Dashboard mode: the whole screen is the crib state. Tap for Home, hold for the lamp. */
 void drawStatusScreen() {
   DisplayState ds = displayState();
@@ -279,8 +285,9 @@ void drawStatusScreen() {
   iconHome(298, 18, dim);
   hit(276, 0, 44, BAR_H, A_DASH_HOME);
 
-  // centre: state word and how long
+  // centre: state word (tap replays its chime) and how long
   text(stateWord(ds), 160, 106, F_HERO, ink, bg);
+  hit(60, 82, 200, 50, A_DASH_WORD, ds != DS_BOOT);
   long secs = sinceSecs();
   String sub;
   if (secs >= 0 && ds != DS_BOOT)
@@ -302,8 +309,9 @@ void drawStatusScreen() {
       foot += String(foot.length() ? "  ·  " : "") + "sound";
     if (dashFooter.length())
       foot += String(foot.length() ? "  ·  " : "") + dashFooter;
-    text(fit(foot, F_SMALL, SCR_W - 2 * PAD), 160, 222, F_SMALL, dim, bg);
+    text(fit(foot, F_SMALL, SCR_W - 2 * PAD), 160, 220, F_SMALL, dim, bg);
   }
+  drawPageDots(ink, lerpCol(bg, ink, 0.35f));
 }
 
 /** Settled night sleep, lights nearly off: one dot, one line. */

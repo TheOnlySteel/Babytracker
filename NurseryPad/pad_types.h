@@ -80,5 +80,6 @@ enum Act {
   // dashboard
   A_VOL,
   A_DASH_HOME,
+  A_DASH_WORD,
   A_DASH_TAP
 };

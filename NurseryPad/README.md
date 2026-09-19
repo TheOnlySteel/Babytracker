@@ -11,13 +11,14 @@ Pinned versions (also in `.github/workflows/firmware.yml`):
 - M5Unified 0.2.22
 - M5GFX 0.2.29
 - ArduinoJson **6.21.5** (the sketch uses the version 6 API; version 7 does not build it)
+- FastLED 3.10.3 (the M5GO Bottom2 LEDs)
 
 ```sh
 arduino-cli config init
 arduino-cli config add board_manager.additional_urls https://espressif.github.io/arduino-esp32/package_esp32_index.json
 arduino-cli core update-index
 arduino-cli core install esp32:esp32@3.3.1
-arduino-cli lib install M5GFX@0.2.29 M5Unified@0.2.22 ArduinoJson@6.21.5
+arduino-cli lib install M5GFX@0.2.29 M5Unified@0.2.22 ArduinoJson@6.21.5 FastLED@3.10.3
 cp NurseryPad/secrets.example.h NurseryPad/secrets.h   # fill in; the copy is git-ignored
 arduino-cli compile --fqbn esp32:esp32:m5stack_core2 NurseryPad
 arduino-cli upload  --fqbn esp32:esp32:m5stack_core2 -p /dev/cu.usbserial-XXXX NurseryPad
@@ -32,6 +33,7 @@ The bundled public trust anchors are GTS Root R4 and ISRG Root X1. Certificate v
 - `NurseryPad.ino` is a stub that includes `app.h`. Keeping the program in a header means the Arduino builder never generates prototypes for it, so it builds the same under the IDE, arduino-cli and CI.
 - `ui.h`: design tokens (palette, type scale, spacing) taken from the design canvas at half scale, text and widget helpers, hit-area registry, icons, formatting.
 - `dashboard.h`: chimes, haptics, derived crib state, and the Dashboard-mode renderers (status, dimmed night, lamp), from CradleWatch.
+- `m5go_leds.h`: the ten LEDs in the M5GO Battery Bottom 2 on GPIO 25, driven with FastLED at a capped, non-blocking 25 fps.
 - `app.h`: state, transport task, write queue, response handling, the pad screens, input, `setup()` and `loop()`.
 
 ## Screens
@@ -48,7 +50,9 @@ Every pad screen has the same 36 px top bar: Back (except on the hub), the title
 - **Review**: reached by tapping an amber notice line. Shows a refused log or a timer operation that needs a decision, with Refresh, Retry and Discard.
 - **Crying**: on any pad screen a live crying state takes over the screen with the pulsing ring until tapped once; the chime loops until then.
 
-**Dashboard mode** is the CradleWatch screen: the whole display is the crib state with the word, how long, and the day's log line along the bottom. Speaker top-left cycles the volume, the home circle top-right returns to the hub, a tap anywhere also returns, and a 600 ms hold toggles the lamp. On the lamp a tap peeks at the numbers and a hold returns to the status page. Settled night sleep in the bed-to-rise window dims to the night screen after 15 s without touch.
+**Dashboard mode** is the CradleWatch screen: the whole display is the crib state with the word, how long, and the day's log line along the bottom. Speaker top-left cycles the volume and plays a confirmation motif at the new level; the home circle top-right returns to the hub; tapping the state word replays its chime; a tap anywhere else also returns home; a 600 ms hold toggles the lamp. A horizontal swipe moves between the three dashboard pages, status, today's sleep numbers, and the lamp, shown by the dots at the bottom. On the lamp a tap peeks at the numbers and a hold returns to the status page. Settled night sleep in the bed-to-rise window dims to the night screen after 15 s without touch.
+
+**Lights.** The Bottom2's ten LEDs breathe in the crib state's colour, low and slow, capped lower in the night window with a 300 mA power ceiling. Pending writes chase in gold, Wi-Fi loss shows a moving amber point, and a device error shows red.
 
 Physical buttons: A is Back, B is Home, C is Dashboard. Sub-screens return to the hub after 45 s idle (2 min on forms, drafts kept); Dashboard never times out.
 
@@ -73,7 +77,7 @@ Compilation does not verify touchscreen coordinates, sound level, Wi-Fi and cert
 The 2026-09-18 build had 32 px targets, actions on press without feedback, three type sizes on one screen and a bottom message banner that hid content; it was replaced by the screens above, which follow the design canvas (https://claude.ai/artifact/97CjRPpawvbcUEZ2h5q6he) at half scale. Verified here: a clean compile with all warnings on. Not verified here: anything on a board. Still to do:
 
 - The feed screen cannot suggest the next side; the snapshot does not carry the last side yet.
-- Restore the remaining CradleWatch niceties the fork dropped: the volume blip, the daytime calm dim, the boot screen, tap-the-word chime replay.
+- Restore the remaining CradleWatch niceties the fork dropped: the daytime calm dim and the boot screen.
 - Bundle GTS Root R1 next to R4 and ISRG X1 after confirming the chain the board actually sees (`openssl s_client -connect <project>.supabase.co:443 -showcerts`); keep the CA that last succeeded instead of retrying from the first on every request.
 - Store the outbox as per-slot keys or bytes rather than one NVS string.
 - Physical checks on two units per `docs/rollout.md` step 10.
