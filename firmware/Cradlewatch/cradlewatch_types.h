@@ -4,7 +4,7 @@
 #pragma once
 #include <Arduino.h>
 
-// Baby status values from GET /baby/status
+// Crib status, from the snapshot's source_status
 enum BabyStatus { BS_NONE, BS_SLEEPING, BS_AWAKE, BS_STIRRING, BS_CRYING, BS_AWAY };
 
 // What the screen shows (sleeping splits into settled green / settling yellow)
@@ -25,12 +25,6 @@ struct Song {
 };
 
 struct DayMetrics {
-  bool haveAny = false;
-  String soothes, rise, bed, naps, longest, inBed, awakeInBed; // display_value strings
+  String rise, bed;              // "07:00", "20:30"
   int bedMin = -1, riseMin = -1; // parsed clock minutes for night mode
-};
-
-struct Box {
-  int x, y, w, h;
-  bool hit(int px, int py) const { return px >= x && px < x + w && py >= y && py < y + h; }
 };

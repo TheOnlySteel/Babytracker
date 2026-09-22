@@ -34,6 +34,20 @@ time_t nowEpoch() {
     return time(nullptr);
   return snapshotEpoch ? snapshotEpoch + (millis() - snapshotMs) / 1000 : 0;
 }
+// millis() wraps every 49.7 days, and `(int32_t)(millis() - at) >= 0` is false for the whole
+// second half of that cycle when `at` is 0 or otherwise stale. A deadline is therefore due once
+// reached OR when it lies further ahead than it could legitimately have been set (`longest`), so a
+// "0 means now" or a deadline left over from weeks ago never parks the poll, the outbox flush or
+// the crying chime for 24.8 days.
+bool due(uint32_t at, uint32_t longest) {
+  uint32_t left = at - millis();
+  return (int32_t)left <= 0 || left > longest;
+}
+/** True while `until` is at most `span` ms ahead: a window that has lapsed stays lapsed. */
+bool within(uint32_t until, uint32_t span) {
+  uint32_t left = until - millis();
+  return left != 0 && left <= span;
+}
 #include "dashboard.h"
 #include "m5go_leds.h"
 
@@ -51,6 +65,14 @@ int queued = 0, amount = 60, pumpAmount = 0, retryStep = 0;
 bool awaitSnapshot = false;
 bool storageReady = true, bottleDraft = false, formula = false;
 bool pending = false, failed = false, statsWanted = false;
+// A timer operation the server refused for good: kept for review and never resent on its own.
+// One-shot logs queued behind it still flush.
+bool timerParked = false;
+// The envelope in flight to device_op. Its result is matched to it by client_op_id, never by
+// whichever envelope happens to sit at the head when the answer arrives.
+String inflightOpId;
+bool inflightTimer = false;
+uint32_t statsAt = 0; // when device_sleep_today last answered
 String notice;                       // persistent problem line; tapping it opens Review
 String toastText, undoOpId, undoRow; // transient confirmation and the one-shot log it can undo
 uint32_t toastUntil = 0;
@@ -216,6 +238,7 @@ bool persistOutbox() {
   return prefs.putString("outbox", data) == data.length();
 }
 void loadOutbox() {
+  timerPending = prefs.getString("timer", ""); // first: an unreadable outbox must not lose it
   DynamicJsonDocument doc(16384);
   String raw = prefs.getString("outbox", "[]");
   if (deserializeJson(doc, raw) || !doc.is<JsonArray>()) {
@@ -232,7 +255,6 @@ void loadOutbox() {
       return;
     }
   }
-  timerPending = prefs.getString("timer", "");
 }
 
 // ---------------- navigation ----------------
@@ -247,74 +269,82 @@ void navigate(Screen next) {
 }
 
 // ---------------- transport (core 0) ----------------
-void request(const char *rpc, const String &body, bool op = false) {
+bool request(const char *rpc, const String &body, bool op = false) {
   if (body.length() >= 1536) {
     tell("Request too large");
-    return;
+    return false;
   }
   NetCommand c = {};
   strlcpy(c.rpc, rpc, sizeof(c.rpc));
   strlcpy(c.body, body.c_str(), sizeof(c.body));
   c.operation = op;
-  if (xQueueSend(commands, &c, 0) == pdTRUE)
-    pending = true;
+  if (xQueueSend(commands, &c, 0) != pdTRUE)
+    return false;
+  pending = true;
+  return true;
 }
 void netTask(void *) {
-  NetCommand cmd;
+  static NetCommand cmd; // 1.5 KB: kept off the task stack, which TLS needs
+  static char chunk[512];
+  const String base = String(SUPABASE_URL) + "/rest/v1/rpc/";
   for (;;) {
     if (xQueueReceive(commands, &cmd, portMAX_DELAY) != pdTRUE)
       continue;
-    NetResult result = {-1, cmd.operation, String(cmd.rpc) == "device_sleep_today", nullptr};
-    for (int ca = 0; ca < 2; ca++) {
-      if (WiFi.status() != WL_CONNECTED)
-        break;
+    NetResult result = {-1, cmd.operation, strcmp(cmd.rpc, "device_sleep_today") == 0, nullptr};
+    if (WiFi.status() == WL_CONNECTED) {
       WiFiClientSecure client;
-      client.setCACert(ca == 0 ? GTS_ROOT_R4 : ISRG_ROOT_X1);
+      // Every bundled root in one handshake; verification is required, never skipped.
+      client.setCACert(SUPABASE_ROOTS);
       client.setHandshakeTimeout(8);
       HTTPClient http;
       http.useHTTP10(true);
       http.setConnectTimeout(5000);
       http.setTimeout(6000);
-      if (!http.begin(client, String(SUPABASE_URL) + "/rest/v1/rpc/" + cmd.rpc))
-        continue;
-      http.addHeader("apikey", SUPABASE_ANON_KEY);
-      http.addHeader("Authorization", String("Bearer ") + SUPABASE_ANON_KEY);
-      http.addHeader("x-device-key", DEVICE_KEY);
-      http.addHeader("Content-Type", "application/json");
-      result.code = http.POST((uint8_t *)cmd.body, strlen(cmd.body));
-      if (result.code > 0) {
-        // Bound response memory even when an endpoint is misconfigured.
-        int size = http.getSize();
-        if (size > 24000) {
-          result.code = -2;
-          http.end();
-          break;
-        }
-        String body;
-        body.reserve(8192);
-        WiFiClient *stream = http.getStreamPtr();
-        uint32_t deadline = millis() + 6000;
-        while (http.connected() && (size > 0 || size == -1) && (int32_t)(deadline - millis()) > 0) {
-          while (stream->available()) {
-            char c = stream->read();
-            body += c;
-            if (size > 0)
-              size--;
+      if (http.begin(client, base + cmd.rpc)) {
+        http.addHeader("apikey", SUPABASE_ANON_KEY);
+        http.addHeader("Authorization", String("Bearer ") + SUPABASE_ANON_KEY);
+        http.addHeader("x-device-key", DEVICE_KEY);
+        http.addHeader("Content-Type", "application/json");
+        result.code = http.POST((uint8_t *)cmd.body, strlen(cmd.body));
+        if (result.code > 0) {
+          // Bound response memory even when an endpoint is misconfigured.
+          int size = http.getSize();
+          if (size > 24000)
+            result.code = -2;
+          else {
+            String body;
+            body.reserve(size > 0 ? size : 8192);
+            WiFiClient *stream = http.getStreamPtr();
+            uint32_t deadline = millis() + 6000;
+            while (stream && http.connected() && (size > 0 || size == -1) && (int32_t)(deadline - millis()) > 0 &&
+                   body.length() <= 24000) {
+              int avail = stream->available();
+              if (avail <= 0) {
+                vTaskDelay(pdMS_TO_TICKS(5));
+                continue;
+              }
+              int want = min(avail, (int)sizeof(chunk));
+              if (size > 0)
+                want = min(want, size);
+              int n = stream->read((uint8_t *)chunk, want);
+              if (n <= 0) {
+                vTaskDelay(pdMS_TO_TICKS(5));
+                continue;
+              }
+              body.concat(chunk, n);
+              if (size > 0)
+                size -= n;
+            }
             if (body.length() > 24000)
-              break;
+              result.code = -2;
+            else if (size > 0)
+              result.code = -3; // cut short: never hand a truncated body to the parser
+            else
+              result.body = strdup(body.c_str());
           }
-          if (body.length() > 24000 || size == 0)
-            break;
-          vTaskDelay(pdMS_TO_TICKS(5));
         }
-        if (body.length() > 24000)
-          result.code = -2;
-        else
-          result.body = strdup(body.c_str());
         http.end();
-        break;
       }
-      http.end();
     }
     if (xQueueSend(results, &result, portMAX_DELAY) != pdTRUE)
       free(result.body);
@@ -384,8 +414,10 @@ String submit(const char *op, JsonObject args, JsonObject target = JsonObject())
 String action(const char *op, const char *targetName = nullptr) {
   DynamicJsonDocument args(256);
   JsonObject a = args.to<JsonObject>();
+  // START NAP is the pad's nap outside the crib; the crib's own naps come from the poller. Marking
+  // it "crib" made the deriver adopt it as the crib episode.
   if (String(op) == "sleep_start")
-    a["place"] = "crib";
+    a["place"] = "other";
   return submit(op, a, targetName ? snapshot[targetName].as<JsonObject>() : JsonObject());
 }
 long elapsed(JsonObject timer) {
@@ -405,6 +437,28 @@ long sideSecs(const char *side) {
   if (String(bf["side"] | "") == side)
     s += (millis() - snapshotMs) / 1000;
   return s;
+}
+/** The client_op_id of a stored envelope, "" when it cannot be read. */
+String opIdOf(const String &envelope) {
+  StaticJsonDocument<32> filter;
+  filter["client_op_id"] = true;
+  StaticJsonDocument<128> doc;
+  if (deserializeJson(doc, envelope, DeserializationOption::Filter(filter)))
+    return "";
+  return doc["client_op_id"] | "";
+}
+/** Keeps only what the pad reads back from a returned entry row: the id and version for a
+ *  versioned follow-up (delete, pump_amount), the times, and the per-side totals. A full row with
+ *  a long segment list would not fit the small documents it is re-read into on every frame. */
+String slimRow(JsonVariantConst row) {
+  StaticJsonDocument<512> slim;
+  for (const char *key : {"id", "updated_at", "started_at", "ended_at"})
+    slim[key] = row[key];
+  slim["payload"]["left_s"] = row["payload"]["left_s"];
+  slim["payload"]["right_s"] = row["payload"]["right_s"];
+  String out;
+  serializeJson(slim, out);
+  return out;
 }
 void dropHead() {
   for (int i = 1; i < queued; i++)
@@ -430,8 +484,13 @@ void undoLast() {
   if (undoOpId.isEmpty())
     return;
   for (int i = 0; i < queued; i++) {
-    DynamicJsonDocument e(1536);
-    if (deserializeJson(e, outbox[i]) == DeserializationError::Ok && String(e["client_op_id"] | "") == undoOpId) {
+    if (opIdOf(outbox[i]) == undoOpId) {
+      if (pending && !inflightTimer && inflightOpId == undoOpId) {
+        // Already on the wire: pulling it now would let its answer drop the next log instead.
+        // Keep the toast up; once the server answers, UNDO deletes the row it created.
+        toast("Sending... tap UNDO again", true);
+        return;
+      }
       for (int j = i + 1; j < queued; j++)
         outbox[j - 1] = outbox[j];
       outbox[--queued] = "";
@@ -442,7 +501,7 @@ void undoLast() {
     }
   }
   if (undoRow.length()) {
-    DynamicJsonDocument e(2048);
+    DynamicJsonDocument e(512);
     deserializeJson(e, undoRow);
     DynamicJsonDocument args(64);
     if (submit("delete", args.to<JsonObject>(), e.as<JsonObject>()).length())
@@ -458,6 +517,15 @@ void undoLast() {
 // ---------------- responses (UI core) ----------------
 void consume(NetResult &r) {
   pending = false;
+  // Which envelope this answers, and whether it is still where it was when it was sent. It
+  // always should be (undo and discard leave an in-flight envelope alone); if not, the answer
+  // is ignored rather than applied to whatever now sits at the head.
+  bool forTimer = inflightTimer, current = false;
+  if (r.operation) {
+    current = inflightOpId.length() && (forTimer ? timerPending.length() && opIdOf(timerPending) == inflightOpId
+                                                 : queued && opIdOf(outbox[0]) == inflightOpId);
+    inflightOpId = "";
+  }
   if (r.code != 200 || !r.body) {
     // 401/403 on any call means the pairing is gone. Another 4xx on an op is the server's
     // final word on that envelope; everything else (5xx, transport, oversize) is retried
@@ -466,10 +534,10 @@ void consume(NetResult &r) {
       tell("Device rejected - check pairing");
       retryAt = millis() + backoffMs();
     } else if (r.operation && r.code >= 400 && r.code < 500) {
-      if (timerPending.length()) {
+      if (current && forTimer) {
         tell("Timer refused. Tap to review");
-        retryAt = UINT32_MAX;
-      } else {
+        timerParked = true;
+      } else if (current) {
         rejectHead("http_" + String(r.code));
         retryAt = 0;
       }
@@ -492,30 +560,36 @@ void consume(NetResult &r) {
   }
   retryStep = 0;
   if (r.operation) {
+    if (!current) {
+      nextPoll = 0;
+      dirty = true;
+      return;
+    }
     const String outcome = doc["outcome"] | "";
     if (outcome == "applied" || outcome == "duplicate") {
-      DynamicJsonDocument sent(1536);
-      deserializeJson(sent, timerPending.length() ? timerPending : outbox[0]);
-      String op = sent["op"] | "";
-      if (timerPending.length()) {
+      String op;
+      {
+        StaticJsonDocument<32> filter;
+        filter["op"] = true;
+        StaticJsonDocument<96> sent;
+        deserializeJson(sent, forTimer ? timerPending : outbox[0], DeserializationOption::Filter(filter));
+        op = sent["op"] | "";
+      }
+      if (forTimer) {
         prefs.remove("timer");
         timerPending = "";
         awaitSnapshot = true;
       } else {
         // Keep the created row while its toast still offers Undo.
-        if (String(sent["client_op_id"] | "") == undoOpId && !doc["row"].isNull()) {
-          undoRow = "";
-          serializeJson(doc["row"], undoRow);
-        }
+        if (opIdOf(outbox[0]) == undoOpId && !doc["row"].isNull())
+          undoRow = slimRow(doc["row"]);
         dropHead();
       }
       if (op == "bf_stop") {
-        lastResultRow = "";
-        serializeJson(doc["row"], lastResultRow);
+        lastResultRow = slimRow(doc["row"]);
         navigate(FEED_DONE);
       } else if (op == "pump_stop") {
-        lastResultRow = "";
-        serializeJson(doc["row"], lastResultRow);
+        lastResultRow = slimRow(doc["row"]);
         pumpAmount = 0;
         navigate(PUMP_AMOUNT);
       } else if (op == "pump_amount" || op == "delete") {
@@ -533,11 +607,11 @@ void consume(NetResult &r) {
     } else if (outcome == "retry" || outcome.isEmpty()) {
       tell("Server busy - retrying");
       retryAt = millis() + backoffMs();
-    } else if (timerPending.length()) {
-      // A timer rejection is retained until explicitly acknowledged; nothing else is queued
-      // behind it because timers are never submitted while one is pending.
+    } else if (forTimer) {
+      // A timer rejection is retained until explicitly acknowledged. Resending would only
+      // return the same stored answer: the server caches every outcome by client_op_id.
       tell(outcome == "conflict" ? "Changed elsewhere. Tap to refresh" : "Timer refused. Tap to review");
-      retryAt = UINT32_MAX;
+      timerParked = true;
     } else {
       rejectHead(outcome + (doc["reason"].is<const char *>() ? ": " + String(doc["reason"].as<const char *>()) : ""));
       retryAt = 0;
@@ -547,6 +621,7 @@ void consume(NetResult &r) {
   }
   if (r.stats) {
     sleepStats.set(doc);
+    statsAt = millis();
     dirty = true;
     return;
   }
@@ -601,8 +676,11 @@ void consume(NetResult &r) {
     if (c["id"].as<String>() == caregiver)
       found = true;
   if (!found) {
-    caregiver = doc["caregivers"][0]["id"] | "";
-    prefs.putString("caregiver", caregiver);
+    String first = doc["caregivers"][0]["id"] | "";
+    if (first != caregiver) { // written only on change: this runs on every snapshot
+      caregiver = first;
+      prefs.putString("caregiver", caregiver);
+    }
   }
   String boot = doc["boot_mode"] | "hub";
   if (boot != prefs.getString("serverBoot", "")) {
@@ -613,10 +691,13 @@ void consume(NetResult &r) {
   }
   awaitSnapshot = false;
   // A rejected operation keeps its warning until the caregiver reviews it.
-  if (retryAt != UINT32_MAX && !rejected.length() && storageReady) {
+  if (!timerParked && !rejected.length() && storageReady) {
     failed = false;
     notice = "";
   }
+  // Today's sleep numbers on screen are refreshed every five minutes, not only on arrival.
+  if ((screen == SLEEP || (screen == DASHBOARD && page == PAGE_STATS)) && millis() - statsAt > 300000UL)
+    statsWanted = true;
   // A timer screen whose timer ended elsewhere falls back to the hub.
   if ((screen == FEED_TIMER && doc["bf"].isNull()) || (screen == PUMP_TIMER && doc["pump"].isNull()))
     if (!timerPending.length())
@@ -790,20 +871,29 @@ void drawStrip() {
                  : String(snapshot["sleep"]["source"] | "") == "cradlewise" ? "CRIB NAP"
                                                                           : "NAP";
   label.toUpperCase();
+  // The crib's own sleep runs all night: a stray tap on the strip must not end it and lock its
+  // timing. The whole strip opens the Sleep screen instead, where End now is a deliberate choice.
+  // One hit area, since hitRect() (press tracking, repaint) knows only one rectangle per id.
+  bool crib = !bf && !pump && String(snapshot["sleep"]["source"] | "") == "cradlewise";
   if (hitDown(A_STRIP_OPEN))
-    canvas.fillRect(0, y + 1, 250, STRIP_H - 1, C_PANEL_HI);
+    canvas.fillRect(0, y + 1, crib ? SCR_W : 250, STRIP_H - 1, C_PANEL_HI);
   canvas.fillRect(10, y + 10, 4, 16, accent);
   text(label, 22, y + 18, F_SMALL, C_TEXT, C_PANEL, lgfx::textdatum_t::middle_left);
   int lx = 22 + textW(label, F_SMALL) + 10;
   text(fmtTimer(elapsed(snapshot[timer].as<JsonObject>())), lx, y + 18, F_BODY, C_TEXT, C_PANEL,
        lgfx::textdatum_t::middle_left);
-  hit(0, y, 250, STRIP_H, A_STRIP_OPEN);
-  bool enabled = timersEnabled();
-  if (hitDown(A_STRIP_STOP))
-    canvas.fillRect(250, y + 1, 70, STRIP_H - 1, C_PANEL_HI);
   canvas.drawFastVLine(250, y, STRIP_H, C_BORDER);
-  text("STOP", 285, y + 18, F_SMALL, enabled ? C_TEXT : C_FAINT, C_PANEL);
-  hit(250, y, 70, STRIP_H, A_STRIP_STOP, enabled);
+  if (crib) {
+    text("OPEN", 285, y + 18, F_SMALL, C_TEXT, C_PANEL);
+    hit(0, y, SCR_W, STRIP_H, A_STRIP_OPEN);
+  } else {
+    hit(0, y, 250, STRIP_H, A_STRIP_OPEN);
+    bool enabled = timersEnabled();
+    if (hitDown(A_STRIP_STOP))
+      canvas.fillRect(250, y + 1, 70, STRIP_H - 1, C_PANEL_HI);
+    text("STOP", 285, y + 18, F_SMALL, enabled ? C_TEXT : C_FAINT, C_PANEL);
+    hit(250, y, 70, STRIP_H, A_STRIP_STOP, enabled);
+  }
   hitBand(0, SCR_H);
 }
 void drawNotice(int y) {
@@ -813,7 +903,7 @@ void drawNotice(int y) {
   hit(0, y - 6, SCR_W, 28, A_NOTICE);
 }
 void drawToast(bool strip) {
-  if (!toastText.length() || (int32_t)(toastUntil - millis()) <= 0)
+  if (!toastText.length() || !within(toastUntil, 5000))
     return;
   int y = (strip ? SCR_H - STRIP_H : SCR_H) - PAD - 36;
   panel(PAD, y, SCR_W - 2 * PAD, 36, C_TOAST, 0, R_TILE);
@@ -907,7 +997,7 @@ void drawFeedTimer(int top, int bottom) {
   primaryButton(PAD + w + GAP, by, w, bh, A_STOP_BF, "STOP", C_AMBER, C_AMBER_INK, F_BODY, enabled);
 }
 void drawFeedDone(int top, int bottom) {
-  DynamicJsonDocument done(2048);
+  DynamicJsonDocument done(512);
   deserializeJson(done, lastResultRow);
   long l = done["payload"]["left_s"] | 0, r = done["payload"]["right_s"] | 0;
   int bh = 48, by = bottom - PAD - bh, mid = top + (by - top) / 2;
@@ -980,7 +1070,7 @@ void drawPumpTimer(int top, int bottom) {
   primaryButton(PAD, by, SCR_W - 2 * PAD, bh, A_STOP_PUMP, "STOP", C_PURPLE, C_PURPLE_INK, F_BODY, enabled);
 }
 void drawPumpAmount(int top, int bottom) {
-  DynamicJsonDocument done(2048);
+  DynamicJsonDocument done(512);
   deserializeJson(done, lastResultRow);
   long secs = max(0L, (long)(parseIso8601Utc(done["ended_at"] | "") - parseIso8601Utc(done["started_at"] | "")));
   text("Pumped " + fmtDur(secs) + "  -  total amount", 160, top + 14, F_SMALL, C_MUTED, C_BG);
@@ -1110,18 +1200,22 @@ void drawDashStats() {
   drawPageDots(C_TEXT, C_FAINT);
 }
 void drawReview(int top, int bottom) {
-  bool refused = rejected.length();
+  bool refused = rejected.length(), unreadable = !refused && !storageReady;
   String what = refused ? "A log was refused: " + rejectedReason : "A timer operation needs review";
   String why = refused ? "It was not saved. Log it again if needed." : "Refresh to see the latest log.";
-  if (!refused && !timerPending.length())
+  if (unreadable) {
+    what = "The stored queue could not be read";
+    why = "Clear it to log again. Unsent logs in it are lost.";
+  } else if (!refused && !timerPending.length())
     what = notice.length() ? notice : "Nothing to review";
   text(fit(what, F_SMALL, SCR_W - 2 * PAD), 160, top + 18, F_SMALL, C_AMBER, C_BG);
   text(fit(why, F_SMALL, SCR_W - 2 * PAD), 160, top + 40, F_SMALL, C_MUTED, C_BG);
   int bh = 44, w = (SCR_W - 2 * PAD - GAP) / 2, y1 = top + 60, y2 = bottom - PAD - bh;
   quietButton(PAD, y1, w, bh, A_REFRESH, "Refresh", C_TEXT, F_SMALL);
   quietButton(PAD + w + GAP, y1, w, bh, A_RETRY, "Retry", C_TEXT, F_SMALL, !refused && timerPending.length());
-  if (refused || (timerPending.length() && retryAt == UINT32_MAX))
-    quietButton(PAD, y2, SCR_W - 2 * PAD, bh, A_DISCARD, refused ? "Discard refused log" : "Drop the timer operation", C_AMBER,
+  if (refused || unreadable || (timerPending.length() && timerParked))
+    quietButton(PAD, y2, SCR_W - 2 * PAD, bh, A_DISCARD,
+                refused ? "Discard refused log" : unreadable ? "Clear stored queue" : "Drop the timer operation", C_AMBER,
                 F_SMALL);
 }
 void drawPad() {
@@ -1243,7 +1337,10 @@ void renderRect(int x, int y, int w, int h) {
 // ---------------- actions ----------------
 void setPage(Page next) {
   page = next;
-  prefs.putString("boot", page == PAGE_LAMP ? "lamp" : "dashboard");
+  // Every swipe and every tap on the crib gem lands here: touch flash only when the mode changes.
+  const char *boot = page == PAGE_LAMP ? "lamp" : "dashboard";
+  if (prefs.getString("boot", "") != boot)
+    prefs.putString("boot", boot);
   if (page == PAGE_STATS)
     statsWanted = true;
   nightWakeUntil = millis() + 15000;
@@ -1358,7 +1455,7 @@ void doAction(int a) {
     action("bf_stop", "bf");
     break;
   case A_DELETE: {
-    DynamicJsonDocument e(2048);
+    DynamicJsonDocument e(512);
     deserializeJson(e, lastResultRow);
     if (submit("delete", obj, e.as<JsonObject>()).length())
       toast("Deleting...");
@@ -1420,7 +1517,7 @@ void doAction(int a) {
     navigate(HUB);
     break;
   case A_SAVE_AMOUNT: {
-    DynamicJsonDocument e(2048);
+    DynamicJsonDocument e(512);
     deserializeJson(e, lastResultRow);
     obj["total_ml"] = pumpAmount;
     submit("pump_amount", obj, e.as<JsonObject>());
@@ -1448,6 +1545,7 @@ void doAction(int a) {
     navigate(HUB);
     break;
   case A_RETRY:
+    timerParked = false;
     retryAt = 0;
     clearNotice();
     navigate(HUB);
@@ -1460,9 +1558,20 @@ void doAction(int a) {
       nextPoll = 0;
       navigate(HUB);
       toast("Refused log discarded");
-    } else if (timerPending.length() && retryAt == UINT32_MAX) {
+    } else if (!storageReady) {
+      // Keep whatever loaded cleanly (the entries before the bad one) and overwrite the rest.
+      if (persistOutbox()) {
+        storageReady = true;
+        clearNotice();
+        nextPoll = 0;
+        navigate(HUB);
+        toast("Stored queue cleared");
+      } else
+        tell("Storage failed. Try again");
+    } else if (timerPending.length() && timerParked) {
       prefs.remove("timer");
       timerPending = "";
+      timerParked = false;
       retryAt = 0;
       clearNotice();
       nextPoll = 0;
@@ -1630,34 +1739,59 @@ void setup() {
   lastTouch = millis();
   render();
 }
+/** Arduino's auto-reconnect gives up on some disconnect reasons, notably "no AP found" after a
+ *  router reboot or power cut, and after the single retry at boot. Nudge it every 30 s while down. */
+void serviceWifi() {
+  static uint32_t downSince = 0, lastKick = 0;
+  if (WiFi.status() == WL_CONNECTED) {
+    downSince = 0;
+    return;
+  }
+  uint32_t now = millis();
+  if (!downSince) {
+    downSince = now | 1;
+    lastKick = now;
+    return;
+  }
+  if (now - downSince > 20000 && now - lastKick > 30000) {
+    lastKick = now;
+    WiFi.reconnect();
+  }
+}
 void loop() {
   serviceInput();
+  serviceWifi();
   serviceVibe();
   serviceSong();
   NetResult result;
   while (xQueueReceive(results, &result, 0) == pdTRUE)
     consume(result);
   if (!pending && WiFi.status() == WL_CONNECTED) {
-    if ((int32_t)(millis() - nextPoll) >= 0) {
+    if (due(nextPoll, 30000)) {
       request("device_snapshot", "{\"protocol\":1}");
       nextPoll = millis() + (screen == DASHBOARD && (curStatus == BS_SLEEPING || curStatus == BS_AWAY) ? 30000 : 15000);
-    } else if (retryAt != UINT32_MAX && (int32_t)(millis() - retryAt) >= 0 && (timerPending.length() || queued)) {
-      String envelope = timerPending.length() ? timerPending : outbox[0];
-      request("device_op", "{\"envelope\":" + envelope + "}", true);
+    } else if (due(retryAt, 300000) && ((timerPending.length() && !timerParked) || queued)) {
+      bool timer = timerPending.length() && !timerParked;
+      const String &envelope = timer ? timerPending : outbox[0];
+      if (request("device_op", "{\"envelope\":" + envelope + "}", true)) {
+        inflightTimer = timer;
+        inflightOpId = opIdOf(envelope);
+      } else
+        retryAt = millis() + backoffMs();
     } else if (statsWanted) {
       request("device_sleep_today", "{}");
       statsWanted = false;
     }
   }
   if (curStatus == BS_CRYING && sourceAge() < 180 && !sourceError.length() && !isMuted() && !cryAcked &&
-      playingSong < 0 && page != PAGE_LAMP && (int32_t)(millis() - cryNextLoopMs) >= 0) {
+      playingSong < 0 && page != PAGE_LAMP && due(cryNextLoopMs, 5500)) {
     playSong(SONG_STORMS);
     cryNextLoopMs = millis() + 5500;
   }
   bool form = screen == BOTTLE || screen == CHANGE_DIAPER || screen == PUMP_AMOUNT || screen == FEED || screen == REVIEW;
   if (screen != HUB && screen != DASHBOARD && millis() - lastTouch > (form ? 120000UL : 45000UL))
     navigate(HUB);
-  if (toastText.length() && (int32_t)(toastUntil - millis()) <= 0) {
+  if (toastText.length() && !within(toastUntil, 5000)) {
     toastText = "";
     undoOpId = "";
     undoRow = "";
@@ -1666,7 +1800,7 @@ void loop() {
   DisplayState ds = displayState();
   serviceM5GoLeds(ds, pending || queued || timerPending.length(), failed, WiFi.status() == WL_CONNECTED, inNightWindow());
   nightDimActive = screen == DASHBOARD && page != PAGE_LAMP && ds == DS_ASLEEP && inNightWindow() &&
-                   (int32_t)(millis() - nightWakeUntil) >= 0 && sourceAge() < 900 && !sourceError.length();
+                   !within(nightWakeUntil, 15000) && sourceAge() < 900 && !sourceError.length();
   uint8_t want = screen == DASHBOARD && page == PAGE_LAMP ? BRIGHT_LAMP
                  : nightDimActive                         ? BRIGHT_NIGHT
                  : ds == DS_CRYING                        ? BRIGHT_ALERT
@@ -1676,7 +1810,7 @@ void loop() {
     M5.Display.setBrightness(want);
   }
   bool animating = ds == DS_CRYING && (screen == DASHBOARD ? page == PAGE_STATUS && !nightDimActive : !cryAcked);
-  if (dirty || (int32_t)(millis() - nextDraw) >= 0) {
+  if (dirty || due(nextDraw, 500)) {
     render();
     nextDraw = millis() + (animating ? 120 : 500);
     serviceInput(); // a full frame is the longest the panel goes unwatched; sample the moment it ends

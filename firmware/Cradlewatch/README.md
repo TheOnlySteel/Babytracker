@@ -26,7 +26,9 @@ arduino-cli upload  --fqbn esp32:esp32:m5stack_core2 -p /dev/cu.usbserial-XXXX f
 
 `secrets.h` needs the Wi-Fi credentials, the project URL (`https://<ref>.supabase.co`), the public anon key, a device key from Settings → Pair device in the web app (shown once), and the POSIX `TZ_STRING`.
 
-The bundled public trust anchors are GTS Root R4 and ISRG Root X1. Certificate validation is mandatory. Verify the actual project chain from a board before using the monitor.
+The bundled public trust anchors are GTS Root R4 and R1 and ISRG Root X1 and X2, passed to mbedTLS as one bundle so a single handshake validates against whichever root the served chain ends in. Certificate validation is mandatory. Verify the actual project chain from a board before using the monitor.
+
+Settings and the offline queue live in the NVS namespace `nurserypad`, the name from before the rename, so reflashing a paired pad keeps its queued logs, pending timer operation, caregiver, boot mode and volume.
 
 ## Files
 
@@ -47,7 +49,7 @@ The palette is the design package's: deep green, midnight blue, antique gold, wa
 
 ## Screens
 
-Every pad screen has the same 36 px top bar: Back (except on the hub), the title (the child's name on the hub), the clock, the caregiver chip (tap to switch who is logging) and the crib-state circle. **The circle opens Dashboard mode from any screen.** A red dot beside the clock means writes are waiting to sync.
+Every pad screen has the same 44 px top bar: Back (except on the hub), the title (the child's name on the hub), the clock, the caregiver chip (tap to switch who is logging) and the crib-state circle. **The circle opens Dashboard mode from any screen.** A red dot beside the clock means writes are waiting to sync.
 
 - **Hub**: one line of state (crib, last feed, last change) and four tiles: FEED, CHANGE, PUMP, SLEEP, each with its most recent event.
 - **Feed**: LEFT and RIGHT start a breastfeed; the BOTTLE row below opens the bottle form. The timer shows the active side, the running total and per-side totals, with SWITCH and STOP. Stop commits; the confirmation shows the totals with Delete (versioned) and DONE.
@@ -55,7 +57,7 @@ Every pad screen has the same 36 px top bar: Back (except on the hub), the title
 - **Change**: WET, DIRTY, BOTH. One tap saves and returns to the hub with an UNDO toast (5 s). The most recent kind is highlighted with its age.
 - **Pump**: START PUMP; the timer has STOP; the amount screen asks for the total in 5 ml steps with Skip and SAVE.
 - **Sleep**: LOG and STATS tabs. Log shows the automatic crib nap (End now, Not a nap) or START NAP / STOP NAP for naps outside the crib, then today's sleeps. Stats is a 3×2 grid: total sleep, naps, longest nap, night sleep, wakings, awake in bed, with rise and bed times and the crib data age.
-- **Timer strip**: while a breastfeed, pump or nap runs and its own screen is not open, a strip along the bottom shows it with a STOP button; tapping the strip opens the timer.
+- **Timer strip**: while a breastfeed, pump or nap runs and its own screen is not open, a strip along the bottom shows it with a STOP button; tapping the strip opens the timer. For the crib's own automatic sleep the button reads OPEN and opens the Sleep screen instead, so a stray tap cannot end the night's sleep; End now is there.
 - **Review**: reached by tapping an amber notice line. Shows a refused log or a timer operation that needs a decision, with Refresh, Retry and Discard.
 - **Crying**: on any pad screen a live crying state takes over the screen with the pulsing ring until tapped once; the chime loops until then.
 
@@ -77,7 +79,7 @@ The frame is one full-screen sprite, in internal RAM when that leaves TLS and JS
 
 Stop saves the timer immediately. Feed Done offers versioned Delete or Done. After stopping a pump, enter its total amount; saving updates the completed row without changing the stop time. Sleep End locks automatic timing; Not a nap keeps the source-key tombstone.
 
-Bottle and diaper logs persist locally before the toast appears and flush in order; eight can wait offline and a ninth is refused. UNDO on the toast removes the log from the queue if it has not been sent, or deletes the row the server created if it has. No timer operation is accepted before NTP has synchronized since boot; bottle and diaper logs may be queued before that and are timestamped at receipt with `time_uncertain`. Timer operations require a recent snapshot and an empty one-shot queue. An uncertain timer request is retained with its operation ID until a definitive response, including across reboot. A refused one-shot log is parked for review so the logs behind it still flush; transient failures back off from 15 s to 5 min.
+Bottle and diaper logs persist locally before the toast appears and flush in order; eight can wait offline and a ninth is refused. UNDO on the toast removes the log from the queue if it has not been sent, or deletes the row the server created if it has. No timer operation is accepted before NTP has synchronized since boot; bottle and diaper logs may be queued before that and are timestamped at receipt with `time_uncertain`. Timer operations require a recent snapshot and no other timer operation outstanding; one goes ahead of any queued logs. An uncertain timer request is retained with its operation ID until a definitive response, including across reboot. Answers are matched to the envelope in flight by operation ID. A refused one-shot log, or a refused timer operation, is parked for review so the logs behind it still flush; transient failures back off from 15 s to 5 min. A stored queue that cannot be read is offered for clearing on Review.
 
 The caregiver chip controls attribution; the device key controls authentication. The source's observation timestamp drives stale warnings; past 15 minutes the crib circle goes hollow and the lamp goes neutral. "Settled" uses observed crib states, not editable sleep-entry duration.
 
@@ -91,7 +93,7 @@ The 2026-09-18 build had 32 px targets, actions on press without feedback, three
 
 - The feed screen cannot suggest the next side; the snapshot does not carry the last side yet.
 - Restore the remaining standalone-monitor niceties the pad dropped: the daytime calm dim and the boot screen.
-- Bundle GTS Root R1 next to R4 and ISRG X1 after confirming the chain the board actually sees (`openssl s_client -connect <project>.supabase.co:443 -showcerts`); keep the CA that last succeeded instead of retrying from the first on every request.
+- Confirm the chain the board actually sees (`openssl s_client -connect <project>.supabase.co:443 -showcerts`) ends in one of the four bundled roots.
 - Store the outbox as per-slot keys or bytes rather than one NVS string.
 - Measure the frame with the profile build before deciding whether the sprite is worth keeping. Drawing straight to the panel, with a sprite only for the lamp gradient and the crying overlay, is the remaining structural win and would retire the PSRAM question.
 - Physical checks on two units per `docs/rollout.md` step 10.

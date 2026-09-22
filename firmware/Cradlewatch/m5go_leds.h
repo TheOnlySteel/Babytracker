@@ -29,7 +29,7 @@ void setupM5GoLeds() {
 void serviceM5GoLeds(DisplayState state, bool isPending, bool isFailed, bool wifiOk,
                      bool night) {
   uint32_t now = millis();
-  if ((int32_t)(now - nextLedFrame) < 0)
+  if (!due(nextLedFrame, 40))
     return;
   nextLedFrame = now + 40; // 25 fps; FastLED.show never runs in the network task
   fill_solid(m5goLeds, M5GO_LED_COUNT, CRGB::Black);

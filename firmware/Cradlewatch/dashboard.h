@@ -76,7 +76,7 @@ void playSong(int id) {
 void serviceSong() {
   if (playingSong < 0)
     return;
-  if ((int32_t)(millis() - noteNextMs) < 0)
+  if (!due(noteNextMs, 2000))
     return;
   const Song &s = SONGS[playingSong];
   if (noteIdx >= s.len) {
@@ -114,7 +114,7 @@ void buzz(uint32_t ms, uint8_t power = 120) {
   vibeOff = millis() + ms;
 }
 void serviceVibe() {
-  if (vibeOff && (int32_t)(millis() - vibeOff) >= 0) {
+  if (vibeOff && due(vibeOff, 1000)) {
     M5.Power.setVibration(0);
     vibeOff = 0;
   }
@@ -365,7 +365,7 @@ void drawLampScreen() {
   for (int i = 0; i < 5; ++i)
     canvas.fillCircle(160, 120, rad[i], lerpCol(C_BLACK, col, glow[i]));
 
-  if ((int32_t)(millis() - lampPeekUntil) < 0) { // tap-to-peek overlay
+  if (within(lampPeekUntil, 4000)) { // tap-to-peek overlay
     if (haveScore) {
       int pct = (int)(100.0f * nsGoodSecs / tot + 0.5f);
       text(String(pct) + "%", 160, 96, F_HERO, C_WHITE, col);
