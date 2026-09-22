@@ -65,6 +65,13 @@ class Store {
   private sleepChannel: RealtimeChannel | null = null;
   private ticker: ReturnType<typeof setInterval> | null = null;
   private everSubscribed = false;
+  /** The refresh in flight, and at most one queued behind it (see refreshEntries). */
+  private refreshRun: Promise<boolean> | null = null;
+  private refreshNext: Promise<boolean> | null = null;
+  /** Ids changed locally (own write or realtime) while a refresh is in flight, with a sequence
+   *  number, so a snapshot fetched before the change cannot overwrite or resurrect it. */
+  private touched = new Map<string, number>();
+  private touchSeq = 0;
 
   async init() {
     const sb = supabase();
@@ -153,10 +160,38 @@ class Store {
     }
   }
 
-  /** Reloads the already-loaded window [loadedSince, now] plus any running timer. Older pages stay. */
-  async refreshEntries(): Promise<boolean> {
+  /**
+   * Reloads the already-loaded window [loadedSince, now] plus any running timer. Older pages stay.
+   * Callers often arrive together (resume, reconnect, online); they share one run, and a caller
+   * that arrives mid-run gets exactly one more run after it, so no refresh can predate its reason.
+   */
+  refreshEntries(): Promise<boolean> {
+    if (this.refreshNext) return this.refreshNext;
+    if (!this.refreshRun) return this.startRefresh();
+    const next = this.refreshRun.catch(() => false).then(() => {
+      this.refreshNext = null;
+      return this.startRefresh();
+    });
+    this.refreshNext = next;
+    return next;
+  }
+
+  private startRefresh(): Promise<boolean> {
+    const run = this.fetchWindow().finally(() => {
+      if (this.refreshRun === run) {
+        this.refreshRun = null;
+        if (!this.refreshNext) this.touched.clear();
+      }
+    });
+    this.refreshRun = run;
+    return run;
+  }
+
+  private async fetchWindow(): Promise<boolean> {
     const sb = supabase();
     const since = this.loadedSince;
+    const uid = this.session?.user.id;
+    const seq = this.touchSeq;
     const [win, running] = await Promise.all([
       this.fetchAll(() =>
         sb
@@ -174,12 +209,23 @@ class Store {
           .in('type', ['breastfeed', 'pump', 'sleep']),
       ),
     ]);
+    // Signed out or switched account while this was in flight: the result is not ours to show.
+    if (uid !== this.session?.user.id) return false;
     if (win.error || running.error) {
       this.syncError = win.error ?? running.error;
       return false;
     }
     const fresh = new Map<string, Entry>();
     for (const e of [...win.rows, ...running.rows]) fresh.set(e.id, e);
+    // A write or realtime event that landed after the fetch started is newer than the snapshot:
+    // keep the local state for those rows (including their absence, for a delete).
+    const local = new Map(this.entries.map((e) => [e.id, e]));
+    for (const [id, at] of this.touched) {
+      if (at <= seq) continue;
+      const mine = local.get(id);
+      if (mine) fresh.set(id, mine);
+      else fresh.delete(id);
+    }
     // Keep older pages that were loaded via loadOlder; replace everything in the refreshed window.
     const older = this.entries.filter(
       (e) =>
@@ -247,6 +293,7 @@ class Store {
         (p) => {
           if (p.eventType === 'DELETE') {
             const id = (p.old as { id: string }).id;
+            this.touch(id);
             this.entries = this.entries.filter((e) => e.id !== id);
             return;
           }
@@ -317,12 +364,22 @@ class Store {
     this.loaded = false;
   }
 
+  private touch(id: string) {
+    if (this.refreshRun) this.touched.set(id, ++this.touchSeq);
+  }
+
   private upsertLocal(row: Entry) {
+    const i = this.entries.findIndex((e) => e.id === row.id);
+    // updated_at is strictly increasing per row (set_updated_at), so an older copy arriving late,
+    // e.g. a write's response after the realtime echo of a newer edit, never replaces a newer one.
+    if (i !== -1 && Date.parse(row.updated_at) < Date.parse(this.entries[i].updated_at)) return;
+    this.touch(row.id);
+    // "Today" and "Last 24 hours" end at `now`; move it so a row just logged is inside them.
+    this.now = new Date();
     if (row.deleted_at) {
-      this.entries = this.entries.filter((e) => e.id !== row.id);
+      if (i !== -1) this.entries = this.entries.filter((e) => e.id !== row.id);
       return;
     }
-    const i = this.entries.findIndex((e) => e.id === row.id);
     if (i === -1) this.entries = [row, ...this.entries];
     else {
       const next = this.entries.slice();
@@ -433,7 +490,10 @@ class Store {
       .eq('id', id)
       .maybeSingle();
     if (data) this.upsertLocal(data as Entry);
-    else this.entries = this.entries.filter((e) => e.id !== id);
+    else {
+      this.touch(id);
+      this.entries = this.entries.filter((e) => e.id !== id);
+    }
     return (data as Entry | null) ?? null;
   }
 

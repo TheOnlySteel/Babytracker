@@ -14,11 +14,12 @@
   },
   "devDependencies": {
     "@electric-sql/pglite": "^0.3.14",
-    "@playwright/test": "^1.55.0",
+    "@playwright/test": "^1.56.1",
     "@sveltejs/adapter-static": "^3.0.10",
     "@sveltejs/kit": "^2.0.0",
     "@sveltejs/vite-plugin-svelte": "^6.0.0",
     "@vite-pwa/sveltekit": "^1.1.0",
+    "papaparse": "^5.4.1",
     "postgres": "^3.4.7",
     "svelte": "^5.0.0",
     "svelte-check": "^4.0.0",
@@ -29,8 +30,6 @@
   },
   "dependencies": {
     "@lucide/svelte": "^0.500.0",
-    "@supabase/supabase-js": "^2.50.0",
-    "dotenv": "^16.4.0",
-    "papaparse": "^5.4.1"
+    "@supabase/supabase-js": "^2.50.0"
   }
 }

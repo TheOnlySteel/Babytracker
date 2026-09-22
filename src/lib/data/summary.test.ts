@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { summarize, groupByDay, feedSessions, windowFor } from './summary';
+import { summarize, groupByDay, feedSessions, windowFor, dayKeyIn } from './summary';
+import { localParts } from './sleep-time';
 import type { Entry } from './types';
 
 // Synthetic, privacy-safe fixture. Times are UTC; the assertions below only use explicit windows.
@@ -106,5 +107,22 @@ describe('running timer clock (audit v2 F01)', () => {
 
   it('defaults the clock to the window end for Summary-style callers', () => {
     expect(summarize([running], midnight, noon).breastfeed.total_s).toBe(300);
+  });
+});
+
+describe('day boundaries', () => {
+  it('counts an entry logged at exactly midnight in one day only', () => {
+    const d = mk('diaper', '2026-09-17T07:00:00Z', { wet: true, dirty: false, dry: false }); // 00:00 PDT
+    const day16 = summarize([d], new Date('2026-09-16T07:00:00Z'), new Date('2026-09-17T07:00:00Z'));
+    const day17 = summarize([d], new Date('2026-09-17T07:00:00Z'), new Date('2026-09-18T07:00:00Z'));
+    expect([day16.diaper.count, day17.diaper.count]).toEqual([0, 1]);
+    expect(groupByDay([d], 'America/Los_Angeles')[0].day).toBe('2026-09-17');
+  });
+
+  it('dayKeyIn agrees with localParts across a DST change', () => {
+    for (const iso of ['2026-11-01T06:30:00Z', '2026-11-01T08:30:00Z', '2026-11-02T07:59:59Z', '2026-03-08T10:00:00Z']) {
+      const at = new Date(iso);
+      expect(dayKeyIn(at, 'America/Los_Angeles')).toBe(localParts(at, 'America/Los_Angeles').date);
+    }
   });
 });

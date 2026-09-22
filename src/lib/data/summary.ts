@@ -5,7 +5,7 @@ import type {
   Entry,
   PumpPayload,
 } from './types';
-import { householdDay, localParts } from './sleep-time';
+import { householdDay } from './sleep-time';
 import { isFeed, pumpTotalMl, type SleepPayload } from './types';
 import { runningElapsed } from './derive';
 
@@ -71,9 +71,10 @@ export function windowFor(
   };
 }
 
+/** Half-open [from, to): an entry at exactly midnight belongs to the day it opens, not both. */
 export function inWindow(e: Entry, from: Date, to: Date): boolean {
   const t = new Date(e.started_at).getTime();
-  return t >= from.getTime() && t <= to.getTime();
+  return t >= from.getTime() && t < to.getTime();
 }
 
 /**
@@ -217,7 +218,7 @@ export function groupByDay(
   for (const e of entries) {
     if (e.deleted_at) continue;
     const key = timezone
-      ? localParts(new Date(e.started_at), timezone).date
+      ? dayKeyIn(new Date(e.started_at), timezone)
       : dayKey(new Date(e.started_at));
     if (!map.has(key)) map.set(key, []);
     map.get(key)!.push(e);
@@ -228,6 +229,19 @@ export function groupByDay(
       day,
       entries: es.sort((a, b) => b.started_at.localeCompare(a.started_at)),
     }));
+}
+
+const dayFormats = new Map<string, Intl.DateTimeFormat>();
+/** YYYY-MM-DD in `tz`, the same date as localParts(d, tz).date. The formatter is cached per zone:
+ *  building one per row (as localParts does) costs about 0.1 ms, which adds up over a history. */
+export function dayKeyIn(d: Date, tz: string): string {
+  let f = dayFormats.get(tz);
+  if (!f) {
+    f = new Intl.DateTimeFormat('en-CA', { timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit' });
+    dayFormats.set(tz, f);
+  }
+  const p = Object.fromEntries(f.formatToParts(d).map((x) => [x.type, x.value]));
+  return `${p.year}-${p.month}-${p.day}`;
 }
 
 export function dayKey(d: Date): string {
@@ -242,7 +256,7 @@ export function latestNightKey(
   now: Date,
   timezone?: string,
 ): string | undefined {
-  const date = timezone ? localParts(now, timezone).date : dayKey(now);
+  const date = timezone ? dayKeyIn(now, timezone) : dayKey(now);
   return entries
     .filter((e) => !e.deleted_at && e.type === 'sleep')
     .map((e) => (e.payload as SleepPayload).night_key)

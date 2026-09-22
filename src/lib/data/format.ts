@@ -54,10 +54,6 @@ export function fmtDayLabel(dayKey: string, now = new Date()): string {
   return date.toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' });
 }
 
-export function fmtMl(ml: number): string {
-  return `${Math.round(ml)} mL`;
-}
-
 export function fmtKg(kg: number): string {
   const totalOz = kg / 0.45359237 * 16;
   const lb = Math.floor(totalOz / 16);
@@ -74,7 +70,8 @@ function startOfDay(d: Date): Date {
 /** Age in days from a YYYY-MM-DD birth date. */
 export function ageDays(birthDate: string, now = new Date()): number {
   const [y, m, d] = birthDate.split('-').map(Number);
-  return Math.floor((startOfDay(now).getTime() - new Date(y, m - 1, d).getTime()) / 86400000);
+  // Round, not floor: after a spring-forward the span between two local midnights is 1 h short.
+  return Math.round((startOfDay(now).getTime() - new Date(y, m - 1, d).getTime()) / 86400000);
 }
 
 /** "5w 3d" */

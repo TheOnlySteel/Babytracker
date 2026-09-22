@@ -6,7 +6,9 @@ export default defineConfig({
   plugins: [
     sveltekit(),
     SvelteKitPWA({
-      registerType: 'autoUpdate',
+      // 'prompt', not 'autoUpdate': autoUpdate reloads the page the moment a new build activates,
+      // which discards whatever a caregiver has typed into an open sheet. See +layout.svelte.
+      registerType: 'prompt',
       strategies: 'generateSW',
       injectRegister: false,
       // SPA on adapter-static: precache the fallback page (revision from version.json) so the app shell starts offline.

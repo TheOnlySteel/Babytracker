@@ -6,6 +6,7 @@
   import { fmtAgo, fmtDuration } from '$lib/data/format';
   import type { BreastfeedPayload } from '$lib/data/types';
   import { dayKey, ofCard } from '$lib/data/summary';
+  import { shiftDate } from '$lib/data/sleep-time';
   import Icon from '$lib/ui/Icon.svelte';
   import LogRow from './LogRow.svelte';
   import CribStatus from './CribStatus.svelte';
@@ -34,7 +35,8 @@
   const last = $derived(all.find((e) => e.ended_at !== null || (e.type !== 'breastfeed' && e.type !== 'pump' && e.type !== 'sleep')));
   const running = $derived(all.find((e) => e.ended_at === null && (e.type === 'breastfeed' || e.type === 'pump' || e.type === 'sleep')));
   const todayKey = $derived(dayKey(store.now));
-  const ydKey = $derived(dayKey(new Date(store.now.getTime() - 86400_000)));
+  // Calendar yesterday: now − 24h is still today during the last hour of a fall-back day.
+  const ydKey = $derived(shiftDate(todayKey, -1));
   const recent = $derived(all.filter((e) => {
     const k = dayKey(new Date(e.started_at));
     return k === todayKey || k === ydKey;
@@ -156,5 +158,4 @@
     min-height: 56px; padding: 0 20px; border-top: 1px solid var(--rule); font-size: 17px;
   }
   .none { padding: 16px 20px; border-top: 1px solid var(--rule); }
-  @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
 </style>
