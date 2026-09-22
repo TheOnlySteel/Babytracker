@@ -5,6 +5,10 @@ import { localParts, localInstant, shiftDate, validTimezone } from '../_shared/s
 
 const API = 'https://integrations.cradlewise.com/api/v1';
 const MAX_PAUSE_S = 3600; // never let one header pause polling for longer than an hour
+// Settled (sleeping/away) states poll once a minute. The cron fires every 30 s, so the check runs
+// at ~30 s and ~60 s after the last observation; a 60 s threshold lost the second tick to
+// invocation jitter often enough to stretch the cadence to 90 s. 55 s lands on it reliably.
+const CALM_POLL_MS = 55000;
 
 const env = (key: string) => {
   const v = Deno.env.get(key);
@@ -101,7 +105,9 @@ Deno.serve(async (req) => {
         delete patch.observation;
         return await finish(id, observation, patch);
       } catch {
-        await finish(id, null, { error: 'transport' });
+        // A timeout on the larger metrics or c-chart responses is that endpoint's problem; if the
+        // network is really down, the next status poll fails too and pauses everything.
+        await finish(id, null, endpoint_name === 'status' ? { error: 'transport' } : local('transport'));
         return false;
       }
     }
@@ -117,7 +123,7 @@ Deno.serve(async (req) => {
     const dayStart = `${shiftDate(nowLocal.date, nowLocal.minute < 480 ? -2 : -1)} 08:00:00`;
     const range = query({ start_time: dayStart, end_time: nowLocal.text });
     const calm = ['sleeping', 'away'].includes(state.status);
-    if (!calm || !state.observed_at || Date.now() - Date.parse(state.observed_at) >= 60000)
+    if (!calm || !state.observed_at || Date.now() - Date.parse(state.observed_at) >= CALM_POLL_MS)
       await fetchApi('status', '/baby/status', (raw) => ({ observation: parseStatus(raw, new Date().toISOString()) }));
     // Always derive, even when admission/backoff blocked a fetch: stale open rows need closure.
     // Before derivation is switched on, fetch the sleep history once so the real response shape
@@ -130,6 +136,8 @@ Deno.serve(async (req) => {
       });
     if (state.derive_enabled) {
       const from = new Date(Date.now() - 36 * 3600000).toISOString();
+      // Every row that overlaps the window (not only those starting in it), plus the open one.
+      // Reconciliation acts only on history inside the same window (see reconcileSleep).
       const sleepRows = () =>
         all(() =>
           db
@@ -137,7 +145,7 @@ Deno.serve(async (req) => {
             .select('*')
             .eq('household_id', hh)
             .eq('type', 'sleep')
-            .or(`started_at.gte.${from},ended_at.is.null`)
+            .or(`started_at.gte.${from},ended_at.gte.${from},ended_at.is.null`)
         );
       const observations = await all(() => db.from('sleep_observations').select('id,status,since,observed_at').eq('household_id', hh).gte('observed_at', from));
       const actions = deriveSleep(observations, await sleepRows(), { ...ctx, now: new Date().toISOString() });
@@ -149,7 +157,7 @@ Deno.serve(async (req) => {
           return { history_raw: raw };
         });
         if (ok && history) {
-          const applied = await rpc('cw_apply', { hh, token, actions: reconcileSleep(history.sleeps, await sleepRows(), ctx) });
+          const applied = await rpc('cw_apply', { hh, token, actions: reconcileSleep(history.sleeps, await sleepRows(), ctx, from) });
           const note = history.unknownLabels.length ? `unknown_labels:${history.unknownLabels.slice(0, 5).join(',')}` : history.droppedIntervals ? `dropped_intervals:${history.droppedIntervals}` : null;
           if (applied) await finish(null, null, { history_ok: true, ...(note ? { history_error: note } : {}) });
         }

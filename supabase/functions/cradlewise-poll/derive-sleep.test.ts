@@ -308,4 +308,17 @@ describe("upstream contracts (synthetic, not captured baby data)", () => {
       ),
     ).toEqual([]);
   });
+  it("acts only on history inside the window its rows were loaded for", () => {
+    // An interval older than the row window could be missing its row (or its tombstone) and be
+    // inserted twice; it is skipped. The in-window one is still inserted.
+    const history = [
+      { start: t(0), end: t(10) },
+      { start: t(20), end: t(30) },
+    ];
+    const actions = reconcileSleep(history, [], ctx(), t(15));
+    expect(actions).toHaveLength(1);
+    expect(actions[0]).toMatchObject({ op: "insert", started_at: t(20), ended_at: t(30) });
+    // A row straddling the boundary still sees both intervals and is not cut down to one.
+    expect(reconcileSleep(history, [row({ ended_at: t(30) })], ctx(), t(15))).toEqual([]);
+  });
 });

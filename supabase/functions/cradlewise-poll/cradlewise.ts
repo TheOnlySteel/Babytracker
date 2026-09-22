@@ -198,10 +198,17 @@ export function parseHistory(raw: unknown, _householdTz: string): HistoryParse {
   return { sleeps, unknownLabels: [...unknown], droppedIntervals: dropped };
 }
 
-export function reconcileSleep(history: HistorySleep[], rows: SleepRow[], ctx: Context): Action[] {
+/**
+ * `from`, when given, is the start of the window the caller loaded `rows` for. Intervals that
+ * begin earlier are not acted on: their rows may not be loaded, so they would be inserted a
+ * second time (or resurrect a dismissed sleep). They still count as overlaps, so a row that
+ * straddles the boundary is never reshaped to the in-window part only.
+ */
+export function reconcileSleep(history: HistorySleep[], rows: SleepRow[], ctx: Context, from?: string): Action[] {
   const actions: Action[] = [];
   const used = new Set<string>();
   for (const h of history) {
+    if (from && Date.parse(h.start) < Date.parse(from)) continue;
     const key = sourceKey(h.start);
     const matching = rows.filter(
       (e) => e.source_key === key || (Date.parse(e.started_at) < Date.parse(h.end) && Date.parse(e.ended_at ?? ctx.now) > Date.parse(h.start))
