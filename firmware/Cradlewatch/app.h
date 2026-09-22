@@ -1601,7 +1601,7 @@ void setup() {
   brightness = BRIGHT_DAY;
   M5.Speaker.begin();
   M5.Power.setLed(0);
-  prefs.begin("cradlewatch", false);
+  prefs.begin("nurserypad", false); // pre-rename namespace, kept so a reflash keeps the queued outbox and settings
   volIdx = prefs.getInt("vol", 2);
   caregiver = prefs.getString("caregiver", "");
   canvas.setColorDepth(16);
