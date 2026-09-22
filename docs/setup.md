@@ -6,7 +6,7 @@ These are the steps for a **new Cradlewatch backend**. If Cradlewatch already si
 
 ## 1. Supabase project
 
-1. https://supabase.com/dashboard → **New project**. Region: **West US (Oregon)** (closest to Vancouver). Save the database password somewhere; you won't need it day to day.
+1. https://supabase.com/dashboard → **New project**. Region: closest to home (the live project ended up in **us-east-1**). Save the database password somewhere; you won't need it day to day.
 2. When it finishes provisioning, open **Project Settings → API** and copy:
    - Project URL → `PUBLIC_SUPABASE_URL`
    - `anon` `public` key → `PUBLIC_SUPABASE_ANON_KEY`
@@ -26,7 +26,7 @@ In the sidebar click **Authentication**.
 
 1. **Sign In / Providers → Email**: leave it enabled. Turn **off** "Allow new users to sign up" so nobody but the two of you can make an account.
 2. **Users → Add user → Create new user**: enter your email, a password, and tick **Auto Confirm User**. Repeat for Dominique. Pick passwords you can type on a phone; a password manager entry each is sensible.
-3. **URL Configuration → Site URL**: `https://lanebabytracker.netlify.app`.
+3. **URL Configuration → Site URL**: `https://cradlewatch.com`.
 
 Forgotten password later: **Authentication → Users → ⋯ → Send password recovery** needs email and won't work here; instead use **⋯ → Reset password** (or delete and re-create the user, then re-run the caregiver insert from `seed.sql` for that one row).
 
@@ -36,7 +36,7 @@ Open `supabase/seed.sql`, replace both placeholder emails, paste into the SQL Ed
 
 ## 5. Netlify
 
-The site `lanebabytracker` already exists and deploys from `main`.
+The site `lanebabytracker` already exists, deploys from `main` and serves https://cradlewatch.com.
 
 1. **Site configuration → Environment variables** → add `PUBLIC_SUPABASE_URL` and `PUBLIC_SUPABASE_ANON_KEY`.
 2. Build settings are in `netlify.toml` (build `npm run build`, publish `build`, Node 22, SPA redirect). Nothing to set in the UI.

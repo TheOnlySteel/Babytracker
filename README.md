@@ -2,7 +2,7 @@
 
 Feed, diaper, pump and sleep log for two caregivers, with a bedside pad. Three parts share one Supabase backend:
 
-- **Web app** (`src/`): an installable SvelteKit PWA that replaced the Nara Baby app, imports the full Nara history and syncs between phones in realtime. Deployed at https://lanebabytracker.netlify.app until the Cradlewatch domain is pointed at it.
+- **Web app** (`src/`): an installable SvelteKit PWA that replaced the Nara Baby app, imports the full Nara history and syncs between phones in realtime. Deployed at https://cradlewatch.com (Netlify site `lanebabytracker`, which also still answers at lanebabytracker.netlify.app).
 - **Cradlewise poller** (`supabase/functions/cradlewise-poll/`): a scheduled Edge Function that reads the crib's sleep state, keeps the observation history and, when switched on, derives sleep entries.
 - **Cradlewatch pad** (`firmware/Cradlewatch/`): M5Stack Core2 firmware with the logging hub, the crib-state dashboard and the night lamp. It talks only to Supabase and never holds a Cradlewise credential.
 
