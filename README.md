@@ -13,7 +13,7 @@ Feed, diaper, pump and sleep log for two caregivers, with a bedside pad. Three p
 | `src/`, `static/` | the web app |
 | `supabase/migrations/` | schema, applied in order; `schedule.sql` sets up the poller's cron, `seed.sql` the household |
 | `supabase/functions/` | the poller and the calendar code it shares with the web app |
-| `supabase/tests/` | database tests (PGlite locally, native Postgres 16 in CI) |
+| `supabase/tests/` | database tests (PGlite locally, native Postgres 17 in CI) |
 | `firmware/Cradlewatch/` | pad firmware; build notes in its README |
 | `scripts/` | Nara CSV importer and icon generator |
 | `tests/e2e/` | Playwright phone scenarios against a mocked Supabase |
