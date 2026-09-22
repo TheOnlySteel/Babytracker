@@ -23,14 +23,14 @@
 </script>
 
 <svelte:head>
-  <title>Rosalie</title>
+  <title>Cradlewatch</title>
   {@html webManifestLink}
 </svelte:head>
 
 {#if !configured}
   <main class="msg">
     <h1>Not configured</h1>
-    <p>Set <code>PUBLIC_SUPABASE_URL</code> and <code>PUBLIC_SUPABASE_ANON_KEY</code> in the build environment. See SETUP.md.</p>
+    <p>Set <code>PUBLIC_SUPABASE_URL</code> and <code>PUBLIC_SUPABASE_ANON_KEY</code> in the build environment. See docs/setup.md.</p>
   </main>
 {:else if !store.ready}
   <main class="msg"><p class="muted">Loading…</p></main>

@@ -8,7 +8,7 @@
     if (store.timezone) timezone = store.timezone;
   });
   let devices = $state<Device[]>([]),
-    name = $state("Nursery pad"),
+    name = $state("Cradlewatch pad"),
     key = $state(""),
     error = $state(""),
     busy = $state(false);
@@ -80,8 +80,8 @@
     /> Automatically log crib sleep</label
   >
   <p class="muted">
-    Enable after the standalone monitors have moved to NurseryPad and the live
-    history format has been verified.
+    Enable once the live Cradlewise history has been checked against a full
+    night in the Cradlewise app.
   </p>
 </section>
 <section>

@@ -31,7 +31,7 @@ jobs:
         env:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: disposable-test-only
-          POSTGRES_DB: babytracker_test
+          POSTGRES_DB: cradlewatch_test
         ports: ['5432:5432']
         options: >-
           --health-cmd pg_isready --health-interval 5s --health-timeout 5s --health-retries 10
@@ -45,7 +45,7 @@ jobs:
       - run: npx svelte-kit sync
       - run: npx vitest run supabase/tests/database.test.ts
         env:
-          BABYTRACKER_TEST_DATABASE_URL: postgresql://postgres:disposable-test-only@localhost:5432/babytracker_test
+          CRADLEWATCH_TEST_DATABASE_URL: postgresql://postgres:disposable-test-only@localhost:5432/cradlewatch_test
   edge:
     runs-on: ubuntu-latest
     steps:

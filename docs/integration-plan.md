@@ -1,8 +1,10 @@
-# Core2 Nursery Pad and Sleep — implementation plan (v2)
+# Cradlewatch pad and sleep — implementation plan (v2)
+
+> **Naming, 2026-09-22:** the project is now **Cradlewatch**. What this plan calls "NurseryPad" is the Cradlewatch pad firmware in `firmware/Cradlewatch/`; what it calls "CradleWatch" is the retired standalone monitor that polled Cradlewise itself, removed from the tree (last at commit 6adf184). The plan is kept as written.
 
 > **Status 2026-09-18:** implemented on this branch through release F (backend collection, sleep on the phones, read-only pad and device writes), with derivation off and nothing deployed. `docs/rollout.md` is the operating checklist; `docs/cradlewise-data-api.md` is the API reference the parsers follow. The bullets below remain the design record.
 
-Written 2026-09-17, revised 2026-09-18 after the Codex review in `docs/review-2026-09-17/` (thirteen findings, an implementation proposal and an acceptance checklist). Baseline is Babytracker `main` at 458e012, which carries the CradleWatch sketch under `CradleWatch/`. Design mockup: the "Core2 Nursery Pad" canvas (tap-through prototype plus twelve static screens).
+Written 2026-09-17, revised 2026-09-18 after the Codex review in `docs/archive/review-2026-09-17/` (thirteen findings, an implementation proposal and an acceptance checklist). Baseline is Babytracker `main` at 458e012, which carries the CradleWatch sketch under `CradleWatch/`. Design mockup: the "Core2 Nursery Pad" canvas (tap-through prototype plus twelve static screens).
 
 ## 0. Decisions
 

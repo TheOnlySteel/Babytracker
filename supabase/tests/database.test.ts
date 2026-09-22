@@ -3,16 +3,16 @@ import { beforeAll, afterAll, describe, it, expect } from 'vitest';
 import { readFileSync, readdirSync } from 'node:fs';
 import postgres from 'postgres';
 import { randomUUID } from 'node:crypto';
-const nativeUrl = process.env.BABYTRACKER_TEST_DATABASE_URL;
+const nativeUrl = process.env.CRADLEWATCH_TEST_DATABASE_URL;
 if (
   nativeUrl &&
-  (new URL(nativeUrl).pathname !== '/babytracker_test' ||
+  (new URL(nativeUrl).pathname !== '/cradlewatch_test' ||
     !['localhost', '127.0.0.1', 'postgres'].includes(
       new URL(nativeUrl).hostname,
     ))
 )
   throw new Error(
-    'Native test URL must target the disposable babytracker_test database',
+    'Native test URL must target the disposable cradlewatch_test database',
   );
 const nativeClient = (url: string) =>
   postgres(url, {

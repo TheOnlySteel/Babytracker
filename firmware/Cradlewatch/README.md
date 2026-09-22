@@ -1,6 +1,6 @@
-# NurseryPad
+# Cradlewatch pad firmware
 
-M5Stack Core2 firmware for the BabyTracker integration. All device RPCs are POST requests to Supabase. The device has no Cradlewise credential and never calls Cradlewise directly.
+M5Stack Core2 firmware for Cradlewatch. All device RPCs are POST requests to Supabase. The device has no Cradlewise credential and never calls Cradlewise directly.
 
 ## Compile and flash
 
@@ -19,9 +19,9 @@ arduino-cli config add board_manager.additional_urls https://espressif.github.io
 arduino-cli core update-index
 arduino-cli core install esp32:esp32@3.3.1
 arduino-cli lib install M5GFX@0.2.29 M5Unified@0.2.22 ArduinoJson@6.21.5 FastLED@3.10.3
-cp NurseryPad/secrets.example.h NurseryPad/secrets.h   # fill in; the copy is git-ignored
-arduino-cli compile --fqbn esp32:esp32:m5stack_core2 NurseryPad
-arduino-cli upload  --fqbn esp32:esp32:m5stack_core2 -p /dev/cu.usbserial-XXXX NurseryPad
+cp firmware/Cradlewatch/secrets.example.h firmware/Cradlewatch/secrets.h   # fill in; the copy is git-ignored
+arduino-cli compile --fqbn esp32:esp32:m5stack_core2 firmware/Cradlewatch
+arduino-cli upload  --fqbn esp32:esp32:m5stack_core2 -p /dev/cu.usbserial-XXXX firmware/Cradlewatch
 ```
 
 `secrets.h` needs the Wi-Fi credentials, the project URL (`https://<ref>.supabase.co`), the public anon key, a device key from Settings → Pair device in the web app (shown once), and the POSIX `TZ_STRING`.
@@ -30,10 +30,10 @@ The bundled public trust anchors are GTS Root R4 and ISRG Root X1. Certificate v
 
 ## Files
 
-- `NurseryPad.ino` is a stub that includes `app.h`. Keeping the program in a header means the Arduino builder never generates prototypes for it, so it builds the same under the IDE, arduino-cli and CI.
+- `Cradlewatch.ino` is a stub that includes `app.h`. Keeping the program in a header means the Arduino builder never generates prototypes for it, so it builds the same under the IDE, arduino-cli and CI.
 - `ui.h`: design tokens (palette, type scale, spacing), text and widget helpers, hit-area registry, glyphs, formatting.
 - `pixel_art.h`: generated. The care and navigation sprites from the 2026-09-19 pixel design package, converted from its one-rect-per-pixel SVGs into indexed 16-colour bitmaps with a shared palette. Index 0 is transparent. The package's woodland scenery is deliberately not included.
-- `dashboard.h`: chimes, haptics, derived crib state, and the Dashboard-mode renderers (status, dimmed night, lamp), from CradleWatch.
+- `dashboard.h`: chimes, haptics, derived crib state, and the Dashboard-mode renderers (status, dimmed night, lamp), adapted from the retired standalone monitor.
 - `m5go_leds.h`: the ten LEDs in the M5GO Battery Bottom 2 on GPIO 25, driven with FastLED at a capped, non-blocking 25 fps.
 - `app.h`: state, transport task, write queue, response handling, the pad screens, input, `setup()` and `loop()`.
 
@@ -59,7 +59,7 @@ Every pad screen has the same 36 px top bar: Back (except on the hub), the title
 - **Review**: reached by tapping an amber notice line. Shows a refused log or a timer operation that needs a decision, with Refresh, Retry and Discard.
 - **Crying**: on any pad screen a live crying state takes over the screen with the pulsing ring until tapped once; the chime loops until then.
 
-**Dashboard mode** is the CradleWatch screen: the whole display is the crib state with the word, how long, and the day's log line along the bottom. Speaker top-left cycles the volume and plays a confirmation motif at the new level; the home circle top-right returns to the hub; tapping the state word replays its chime; a tap anywhere else also returns home; a 600 ms hold toggles the lamp. A horizontal swipe moves between the three dashboard pages, status, today's sleep numbers, and the lamp, shown by the dots at the bottom. On the lamp a tap peeks at the numbers and a hold returns to the status page. Settled night sleep in the bed-to-rise window dims to the night screen after 15 s without touch.
+**Dashboard mode** is the old standalone monitor screen: the whole display is the crib state with the word, how long, and the day's log line along the bottom. Speaker top-left cycles the volume and plays a confirmation motif at the new level; the home circle top-right returns to the hub; tapping the state word replays its chime; a tap anywhere else also returns home; a 600 ms hold toggles the lamp. A horizontal swipe moves between the three dashboard pages, status, today's sleep numbers, and the lamp, shown by the dots at the bottom. On the lamp a tap peeks at the numbers and a hold returns to the status page. Settled night sleep in the bed-to-rise window dims to the night screen after 15 s without touch.
 
 **Lights.** The Bottom2's ten LEDs breathe in the crib state's colour, low and slow, capped lower in the night window with a 300 mA power ceiling. Pending writes chase in gold, Wi-Fi loss shows a moving amber point, and a device error shows red.
 
@@ -71,7 +71,7 @@ Every tappable element registers two rectangles while it is drawn: the one it dr
 
 A press highlights the element and buzzes. It stays armed while the finger stays within 22 px of the element and re-arms if the finger comes back, so an ordinary thumb roll no longer eats the tap; it fires on release and is abandoned if the element has left the screen meanwhile. A press on a disabled control is swallowed. Precedence: waking a dimmed screen, then the element under the finger.
 
-The frame is one full-screen sprite, in internal RAM when that leaves TLS and JSON their room, else in PSRAM. A change confined to one control repaints and transfers only that rectangle, since `pushImage` clips before it transfers, and the stepper's plus and minus mark just their own row rather than the whole frame; a full 320x240 push is about 31 ms of SPI time by itself, and the panel cannot see the finger while it happens. Input is sampled at the top of the loop and again the instant a repaint ends, so a frame costs at most one sample rather than a gesture. Build with `-DNURSERYPAD_PROFILE` to print frame times and the worst input gap to serial at 115200. Brightness is written to the PMIC only when it changes, since it shares the touch controller's I2C bus.
+The frame is one full-screen sprite, in internal RAM when that leaves TLS and JSON their room, else in PSRAM. A change confined to one control repaints and transfers only that rectangle, since `pushImage` clips before it transfers, and the stepper's plus and minus mark just their own row rather than the whole frame; a full 320x240 push is about 31 ms of SPI time by itself, and the panel cannot see the finger while it happens. Input is sampled at the top of the loop and again the instant a repaint ends, so a frame costs at most one sample rather than a gesture. Build with `-DCRADLEWATCH_PROFILE` to print frame times and the worst input gap to serial at 115200. Brightness is written to the PMIC only when it changes, since it shares the touch controller's I2C bus.
 
 ## Behaviour that matters
 
@@ -90,7 +90,7 @@ Compilation does not verify touchscreen coordinates, sound level, Wi-Fi and cert
 The 2026-09-18 build had 32 px targets, actions on press without feedback, three type sizes on one screen and a bottom message banner that hid content; it was replaced by the screens above, which follow the design canvas (https://claude.ai/artifact/97CjRPpawvbcUEZ2h5q6he) at half scale. The screens that replaced it still resolved a touch by draw order, which let the body's first control take the bottom rows of the top bar: on Sleep the tab strip owned 14 of the bar's 36 rows, so the lower half of the Back chevron selected a tab and the crib circle opened Stats. The input model above is the fix. Verified here: a clean compile with all warnings on, and the hit table simulated off the shipped `hit`/`hitAt` code to confirm the bar keeps all 44 of its rows on every screen. Not verified here: anything on a board, including the frame times the profile build reports. Still to do:
 
 - The feed screen cannot suggest the next side; the snapshot does not carry the last side yet.
-- Restore the remaining CradleWatch niceties the fork dropped: the daytime calm dim and the boot screen.
+- Restore the remaining standalone-monitor niceties the pad dropped: the daytime calm dim and the boot screen.
 - Bundle GTS Root R1 next to R4 and ISRG X1 after confirming the chain the board actually sees (`openssl s_client -connect <project>.supabase.co:443 -showcerts`); keep the CA that last succeeded instead of retrying from the first on every request.
 - Store the outbox as per-slot keys or bytes rather than one NVS string.
 - Measure the frame with the profile build before deciding whether the sprite is worth keeping. Drawing straight to the panel, with a sprite only for the lamp gradient and the crying overlay, is the remaining structural win and would retire the PSRAM question.

@@ -1,4 +1,4 @@
-// NurseryPad application: state, transport, screens and input. Included once by the sketch.
+// Cradlewatch pad application: state, transport, screens and input. Included once by the sketch.
 // Kept in a header so the Arduino builder never generates prototypes for it: every function
 // here is defined before it is used.
 #pragma once
@@ -54,9 +54,9 @@ bool pending = false, failed = false, statsWanted = false;
 String notice;                       // persistent problem line; tapping it opens Review
 String toastText, undoOpId, undoRow; // transient confirmation and the one-shot log it can undo
 uint32_t toastUntil = 0;
-// Build with -DNURSERYPAD_PROFILE to print frame and input timing to serial at 115200. Off by
+// Build with -DCRADLEWATCH_PROFILE to print frame and input timing to serial at 115200. Off by
 // default: it costs a timer read per frame and a serial write every five seconds.
-#ifdef NURSERYPAD_PROFILE
+#ifdef CRADLEWATCH_PROFILE
 uint32_t profFullUs = 0, profFullN = 0, profRectUs = 0, profRectN = 0;
 uint32_t profSampleAt = 0, profWorstGap = 0, profReportAt = 0;
 void profSampled() {
@@ -631,7 +631,7 @@ String caregiverName() {
       return c["name"].as<String>();
   return "Caregiver";
 }
-String childName() { return snapshot["child_name"] | "Nursery"; }
+String childName() { return snapshot["child_name"] | "Cradlewatch"; }
 /** "2h 10m ago" for an ISO timestamp, "" when absent. */
 String agoOf(JsonVariant at) {
   time_t t = parseIso8601Utc(at | "");
@@ -1207,14 +1207,14 @@ void drawFrame() {
 void render() {
   dirty = false;
   dirtyRect = false;
-#ifdef NURSERYPAD_PROFILE
+#ifdef CRADLEWATCH_PROFILE
   uint32_t t0 = micros();
 #endif
   drawFrame();
   M5.Display.startWrite();
   canvas.pushSprite(0, 0);
   M5.Display.endWrite();
-#ifdef NURSERYPAD_PROFILE
+#ifdef CRADLEWATCH_PROFILE
   profFullUs += micros() - t0;
   profFullN++;
 #endif
@@ -1223,7 +1223,7 @@ void render() {
  *  rectangle crosses the bus: a pressed control costs about a millisecond instead of thirty. */
 void renderRect(int x, int y, int w, int h) {
   dirtyRect = false;
-#ifdef NURSERYPAD_PROFILE
+#ifdef CRADLEWATCH_PROFILE
   uint32_t t0 = micros();
 #endif
   canvas.setClipRect(x, y, w, h);
@@ -1234,7 +1234,7 @@ void renderRect(int x, int y, int w, int h) {
   canvas.pushSprite(0, 0);
   M5.Display.endWrite();
   M5.Display.clearClipRect();
-#ifdef NURSERYPAD_PROFILE
+#ifdef CRADLEWATCH_PROFILE
   profRectUs += micros() - t0;
   profRectN++;
 #endif
@@ -1585,7 +1585,7 @@ void serviceInput() {
   M5.update();
   serviceTouch();
   serviceButtons();
-#ifdef NURSERYPAD_PROFILE
+#ifdef CRADLEWATCH_PROFILE
   profSampled();
 #endif
 }
@@ -1593,7 +1593,7 @@ void serviceInput() {
 void setup() {
   auto cfg = M5.config();
   M5.begin(cfg);
-#ifdef NURSERYPAD_PROFILE
+#ifdef CRADLEWATCH_PROFILE
   Serial.begin(115200);
 #endif
   M5.Display.setRotation(1);
@@ -1601,7 +1601,7 @@ void setup() {
   brightness = BRIGHT_DAY;
   M5.Speaker.begin();
   M5.Power.setLed(0);
-  prefs.begin("nurserypad", false);
+  prefs.begin("cradlewatch", false);
   volIdx = prefs.getInt("vol", 2);
   caregiver = prefs.getString("caregiver", "");
   canvas.setColorDepth(16);
@@ -1626,7 +1626,7 @@ void setup() {
   configTzTime(TZ_STRING, "pool.ntp.org", "time.nist.gov");
   commands = xQueueCreate(1, sizeof(NetCommand));
   results = xQueueCreate(2, sizeof(NetResult));
-  xTaskCreatePinnedToCore(netTask, "nursery-net", 32768, nullptr, 1, nullptr, 0);
+  xTaskCreatePinnedToCore(netTask, "cw-net", 32768, nullptr, 1, nullptr, 0);
   lastTouch = millis();
   render();
 }

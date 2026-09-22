@@ -1,4 +1,4 @@
-# Baby Tracker — Design Spec
+# Cradlewatch — original design spec (written as "Baby Tracker")
 
 Replacement for the Nara Baby app, scoped to feed, diaper and pump logging for two caregivers. Written 2026-09-16 from the Nara CSV export (`export_narababy_rosalie_20260916.csv`) and eleven reference screenshots (IMG_2593–IMG_2604). Reference screenshots define the target look; the export defines the data model and is the test fixture.
 

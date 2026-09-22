@@ -1,4 +1,4 @@
-// Shared types for CradleWatch. These live in a header (not the .ino) because
+// Shared types for the Cradlewatch pad. These live in a header (not the .ino) because
 // the Arduino builder hoists auto-generated function prototypes above type
 // definitions in the sketch, which breaks any function signature using them.
 #pragma once
@@ -14,13 +14,20 @@ enum SongId { SONG_LULLABY, SONG_NOCTURNE, SONG_SUNS, SONG_STORMS, SONG_SARIA, S
 
 enum Page { PAGE_STATUS, PAGE_STATS, PAGE_LAMP };
 
-struct Note { uint16_t freq; uint16_t ms; uint16_t gapMs; };   // gapMs = silence after the note
-struct Song { const Note* notes; uint8_t len; };
+struct Note {
+  uint16_t freq;
+  uint16_t ms;
+  uint16_t gapMs;
+}; // gapMs = silence after the note
+struct Song {
+  const Note *notes;
+  uint8_t len;
+};
 
 struct DayMetrics {
-  bool   haveAny = false;
-  String soothes, rise, bed, naps, longest, inBed, awakeInBed;   // display_value strings
-  int    bedMin = -1, riseMin = -1;           // parsed clock minutes for night mode
+  bool haveAny = false;
+  String soothes, rise, bed, naps, longest, inBed, awakeInBed; // display_value strings
+  int bedMin = -1, riseMin = -1; // parsed clock minutes for night mode
 };
 
 struct Box {

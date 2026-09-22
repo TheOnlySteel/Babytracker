@@ -2,7 +2,7 @@
 
 One-time steps to get the tracker live. About 30 minutes. The app is useless until step 3 is done, so do these in order.
 
-These are the steps for a **new BabyTracker backend**. If BabyTracker already signs in and saves logs against Supabase, reuse that project and household; do not recreate them. To add the new Cradlewise connection, follow [the rollout guide](docs/rollout.md). A tested implementation does not mean its cloud services have been configured or deployed.
+These are the steps for a **new Cradlewatch backend**. If Cradlewatch already signs in and saves logs against Supabase, reuse that project and household; do not recreate them. To add the new Cradlewise connection, follow [the rollout guide](docs/rollout.md). A tested implementation does not mean its cloud services have been configured or deployed.
 
 ## 1. Supabase project
 

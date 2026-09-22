@@ -1,4 +1,4 @@
-// Adapted from CradleWatch: chimes, haptics, derived crib state, and the dashboard-mode
+// Adapted from the retired standalone monitor: chimes, haptics, derived crib state, and the dashboard-mode
 // renderers (status, dimmed night, lamp). Restyled to the design canvas. No network calls.
 #pragma once
 

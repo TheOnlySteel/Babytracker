@@ -1,4 +1,4 @@
-name: NurseryPad firmware
+name: Cradlewatch firmware
 on:
   pull_request:
   push:
@@ -17,5 +17,5 @@ jobs:
           arduino-cli core update-index
           arduino-cli core install esp32:esp32@3.3.1
           arduino-cli lib install M5GFX@0.2.29 M5Unified@0.2.22 ArduinoJson@6.21.5 FastLED@3.10.3
-          cp NurseryPad/secrets.example.h NurseryPad/secrets.h
-          arduino-cli compile --fqbn esp32:esp32:m5stack_core2 NurseryPad
+          cp firmware/Cradlewatch/secrets.example.h firmware/Cradlewatch/secrets.h
+          arduino-cli compile --fqbn esp32:esp32:m5stack_core2 firmware/Cradlewatch
