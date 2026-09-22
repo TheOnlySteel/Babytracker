@@ -25,7 +25,7 @@ The goal is for the family to rely on Cradlewatch by the end of the week of 2026
    - revocation;
    - an overnight run with the lamp.
 8. **Before switching on automatic crib logging** (rollout step 8):
-   - Land the reconciliation fix that stops a running sleep from being closed by a missed short wake. It is in progress on this branch; if it is not there, do not switch derivation on.
+   - Make sure the poller deployed in step 4 includes the reconciliation fix that stops a missed short wake from closing a running sleep (on this branch).
    - Then turn it on in Settings and compare one full night and a few naps with the Cradlewise app.
 
 ## Next fixes, by severity

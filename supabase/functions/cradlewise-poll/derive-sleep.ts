@@ -27,6 +27,8 @@ export interface Context {
   timezone: string;
   bed_min?: number | null;
   rise_min?: number | null;
+  /** Latest observed crib status. Reconciliation never ends an open row while it is sleeping or stirring. */
+  status?: string | null;
 }
 const ms = (v: string) => Date.parse(v);
 const NON_SLEEP = new Set(['awake', 'crying', 'away']);

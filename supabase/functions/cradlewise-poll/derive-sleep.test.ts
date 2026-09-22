@@ -308,6 +308,21 @@ describe("upstream contracts (synthetic, not captured baby data)", () => {
       ),
     ).toEqual([]);
   });
+  it("never ends an open row while the crib still reports sleep", () => {
+    // Status polling saw one unbroken sleep (since unchanged). The c-chart shows a completed
+    // interval, a short awake the polls missed, and a trailing sleep with no end yet.
+    const history = [{ start: t(1), end: t(20) }];
+    const open = row(); // started t(0), ended_at null
+    for (const status of ["sleeping", "stirring"]) {
+      const actions = reconcileSleep(history, [open], { ...ctx(40), status });
+      expect(actions).toEqual([{ op: "update", id: "s", version: t(0), started_at: t(1) }]);
+      expect(actions[0]).not.toHaveProperty("ended_at");
+    }
+    // Same start already: nothing to do, and certainly no end.
+    expect(reconcileSleep(history, [row({ started_at: t(1) })], { ...ctx(40), status: "sleeping" })).toEqual([]);
+    // Once the crib reports a wake, reconciliation may close it as before.
+    expect(reconcileSleep(history, [open], { ...ctx(40), status: "awake" })[0]).toMatchObject({ ended_at: t(20) });
+  });
   it("acts only on history inside the window its rows were loaded for", () => {
     // An interval older than the row window could be missing its row (or its tombstone) and be
     // inserted twice; it is skipped. The in-window one is still inserted.

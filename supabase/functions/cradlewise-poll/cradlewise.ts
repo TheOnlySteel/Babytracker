@@ -224,6 +224,14 @@ export function reconcileSleep(history: HistorySleep[], rows: SleepRow[], ctx: C
       const hits = history.filter((x) => Date.parse(e.started_at) < Date.parse(x.end) && Date.parse(e.ended_at ?? ctx.now) > Date.parse(x.start));
       if (hits.length > 1) continue;
       used.add(e.id);
+      // The crib still reports sleep: a completed c-chart interval here means a short wake the
+      // status polls never saw, and the sleep after it has no end yet. Ending the row would stop
+      // the running sleep (derivation cannot reopen the same key), so only its start is
+      // corrected; live derivation closes it.
+      if (!e.ended_at && (ctx.status === 'sleeping' || ctx.status === 'stirring')) {
+        if (e.started_at !== h.start) actions.push({ op: 'update', id: e.id, version: e.updated_at, started_at: h.start });
+        continue;
+      }
       if (e.started_at === h.start && e.ended_at === h.end && e.payload.provisional === false) continue;
       actions.push({ op: 'update', id: e.id, version: e.updated_at, started_at: h.start, ended_at: h.end, payload: { provisional: false, uncertain_end: false } });
     } else

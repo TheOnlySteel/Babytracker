@@ -150,6 +150,8 @@ Deno.serve(async (req) => {
       const observations = await all(() => db.from('sleep_observations').select('id,status,since,observed_at').eq('household_id', hh).gte('observed_at', from));
       const actions = deriveSleep(observations, await sleepRows(), { ...ctx, now: new Date().toISOString() });
       if (actions.length) await rpc('cw_apply', { hh, token, actions });
+      // Newest observation, including one recorded by this tick (the lease snapshot predates it).
+      const latestStatus: string = observations.at(-1)?.status ?? state.status;
       if (!state.history_at || Date.now() - Date.parse(state.history_at) >= 3600000 || Date.parse(state.history_at) < +lastRise) {
         let history: ReturnType<typeof parseHistory> | undefined;
         const ok = await fetchApi('history', `/sleep/c-chart?${range}`, (raw) => {
@@ -157,7 +159,7 @@ Deno.serve(async (req) => {
           return { history_raw: raw };
         });
         if (ok && history) {
-          const applied = await rpc('cw_apply', { hh, token, actions: reconcileSleep(history.sleeps, await sleepRows(), ctx, from) });
+          const applied = await rpc('cw_apply', { hh, token, actions: reconcileSleep(history.sleeps, await sleepRows(), { ...ctx, status: latestStatus }, from) });
           const note = history.unknownLabels.length ? `unknown_labels:${history.unknownLabels.slice(0, 5).join(',')}` : history.droppedIntervals ? `dropped_intervals:${history.droppedIntervals}` : null;
           if (applied) await finish(null, null, { history_ok: true, ...(note ? { history_error: note } : {}) });
         }
