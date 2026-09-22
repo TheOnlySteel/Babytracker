@@ -45,8 +45,8 @@
       if (!rows) return;
       const stamp = new Date().toISOString().slice(0, 10);
       // One file per tap: iOS Safari only reliably delivers a single download per user gesture.
-      if (format === 'json') download(`babytracker-${stamp}.json`, 'application/json', JSON.stringify({ exported_at: new Date().toISOString(), child: store.child, caregivers: store.caregivers, entries: rows }, null, 2));
-      else download(`babytracker-${stamp}.csv`, 'text/csv', toCsv(rows));
+      if (format === 'json') download(`cradlewatch-${stamp}.json`, 'application/json', JSON.stringify({ exported_at: new Date().toISOString(), child: store.child, caregivers: store.caregivers, entries: rows }, null, 2));
+      else download(`cradlewatch-${stamp}.csv`, 'text/csv', toCsv(rows));
       toast(`Exported ${rows.length} entries as ${format.toUpperCase()}`);
     } finally {
       exporting = false;

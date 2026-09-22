@@ -30,13 +30,28 @@
     else next.add(day);
     open = next;
   }
-  function dayStats(day: string, entries: Entry[]) {
-    const [y, m, d] = day.split('-').map(Number);
+  // A sleep can cross midnight into a day it did not start on, so every day's totals see all sleeps;
+  // everything else is counted only under the day it started (the day's own rows).
+  const sleeps = $derived(store.entries.filter((e) => e.type === 'sleep'));
+  // Day boundaries never change for a given zone; resolving one costs a dozen Intl calls.
+  const bounds = new Map<string, { from: Date; to: Date }>();
+  function dayBounds(day: string) {
     const tz = store.timezone;
-    const from = tz ? localInstant(`${day} 00:00:00`, tz) : new Date(y, m - 1, d);
-    const to = tz ? localInstant(`${shiftDate(day, 1)} 00:00:00`, tz) : new Date(y, m - 1, d + 1);
+    const k = `${tz ?? ''}|${day}`;
+    let b = bounds.get(k);
+    if (!b) {
+      const [y, m, d] = day.split('-').map(Number);
+      b = tz
+        ? { from: localInstant(`${day} 00:00:00`, tz), to: localInstant(`${shiftDate(day, 1)} 00:00:00`, tz) }
+        : { from: new Date(y, m - 1, d), to: new Date(y, m - 1, d + 1) };
+      bounds.set(k, b);
+    }
+    return b;
+  }
+  function dayStats(day: string, entries: Entry[]) {
+    const { from, to } = dayBounds(day);
     return summarize(
-      store.entries,
+      [...entries.filter((e) => e.type !== 'sleep'), ...sleeps],
       from,
       to,
       store.child?.birth_date,
@@ -65,7 +80,7 @@
   {#each days as { day, entries } (day)}
     {@const s = dayStats(day, entries)}
     {@const isOpen = open.has(day)}
-    {@const night = nightSummary(store.entries, shiftDate(day, -1), store.now)}
+    {@const night = nightSummary(sleeps, shiftDate(day, -1), store.now)}
     <section class="day">
       <button
         class="dayhead"

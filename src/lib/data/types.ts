@@ -171,5 +171,3 @@ export const pumpTotalMl = (p: PumpPayload) =>
 export const breastfeedTotalS = (p: BreastfeedPayload) =>
   (p.left_s ?? 0) + (p.right_s ?? 0);
 
-export const isSleep = (e: Entry): e is Entry<SleepPayload> =>
-  e.type === 'sleep';

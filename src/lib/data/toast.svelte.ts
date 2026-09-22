@@ -2,6 +2,8 @@ export interface Toast {
   id: number;
   message: string;
   undo?: () => void | Promise<void>;
+  /** button text for `undo`; defaults to "Undo" */
+  action?: string;
   /** milliseconds; 0 keeps the toast until dismissed */
   ttl: number;
   kind: 'info' | 'error';
@@ -13,8 +15,8 @@ export const UNDO_TTL = 8000;
 let seq = 0;
 export const toasts = $state<{ list: Toast[] }>({ list: [] });
 
-export function toast(message: string, opts: { undo?: () => void | Promise<void>; ttl?: number; kind?: 'info' | 'error' } = {}) {
-  const t: Toast = { id: ++seq, message, undo: opts.undo, ttl: opts.ttl ?? (opts.undo ? UNDO_TTL : 2500), kind: opts.kind ?? 'info' };
+export function toast(message: string, opts: { undo?: () => void | Promise<void>; action?: string; ttl?: number; kind?: 'info' | 'error' } = {}) {
+  const t: Toast = { id: ++seq, message, undo: opts.undo, action: opts.action, ttl: opts.ttl ?? (opts.undo ? UNDO_TTL : 2500), kind: opts.kind ?? 'info' };
   toasts.list = [...toasts.list, t];
   if (t.ttl > 0) setTimeout(() => dismiss(t.id), t.ttl);
   return t.id;

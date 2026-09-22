@@ -3,16 +3,16 @@ import { beforeAll, afterAll, describe, it, expect } from 'vitest';
 import { readFileSync, readdirSync } from 'node:fs';
 import postgres from 'postgres';
 import { randomUUID } from 'node:crypto';
-const nativeUrl = process.env.BABYTRACKER_TEST_DATABASE_URL;
+const nativeUrl = process.env.CRADLEWATCH_TEST_DATABASE_URL;
 if (
   nativeUrl &&
-  (new URL(nativeUrl).pathname !== '/babytracker_test' ||
+  (new URL(nativeUrl).pathname !== '/cradlewatch_test' ||
     !['localhost', '127.0.0.1', 'postgres'].includes(
       new URL(nativeUrl).hostname,
     ))
 )
   throw new Error(
-    'Native test URL must target the disposable babytracker_test database',
+    'Native test URL must target the disposable cradlewatch_test database',
   );
 const nativeClient = (url: string) =>
   postgres(url, {
@@ -475,6 +475,70 @@ describe.sequential('poller admission, lease fencing and RLS', () => {
       foreignUser,
     ]);
     expect(await q('select household_id from public.sleep_status')).toEqual([]);
+  });
+});
+
+describe.sequential('0010: policy initplans, anon grants and lean poll payloads', () => {
+  it('pins the RLS helper to an empty search_path', async () => {
+    await role('postgres');
+    const [f] = await q(
+      "select p.proconfig, p.prosecdef from pg_proc p where p.oid = 'public.my_household_id()'::regprocedure",
+    );
+    expect(f.prosecdef).toBe(true);
+    expect(f.proconfig).toEqual(['search_path=""']);
+  });
+  it('evaluates identity once per statement in every policy', async () => {
+    await role('postgres');
+    const policies = await q(
+      "select tablename, policyname, coalesce(qual,'') || ' ' || coalesce(with_check,'') expr from pg_policies where schemaname='public'",
+    );
+    expect(policies.length).toBeGreaterThanOrEqual(13);
+    for (const p of policies) {
+      // Every call must sit inside a scalar sub-select, which the planner runs once as an initPlan.
+      const calls = p.expr.match(/(my_household_id|auth\.uid)\(\)/g) ?? [];
+      const wrapped = p.expr.match(/SELECT (public\.)?(my_household_id|auth\.uid)\(\)/g) ?? [];
+      expect({ policy: p.policyname, calls: calls.length }).toEqual({ policy: p.policyname, calls: wrapped.length });
+      expect(calls.length).toBeGreaterThan(0);
+    }
+    // Behaviour is unchanged: the caller still sees and writes only their own household.
+    await q("select set_config('request.jwt.claim.sub',$1,false)", [user]);
+    await role('authenticated');
+    expect(await q('select id from public.households')).toEqual([{ id: hh }]);
+    await expect(
+      q("insert into public.entries(household_id,type,started_at,created_by) values($1,'diaper',now(),$2)", [hh, foreignUser]),
+    ).rejects.toThrow(/row-level security/);
+  });
+  it('gives anon nothing on the base tables and no API role TRUNCATE', async () => {
+    await role('postgres');
+    const rows = await q(
+      `select c.relname, r.rolname, p.priv from pg_class c join pg_namespace n on n.oid=c.relnamespace
+         cross join (values ('anon'),('authenticated')) r(rolname)
+         cross join (values ('select'),('insert'),('update'),('delete'),('truncate'),('references'),('trigger')) p(priv)
+       where n.nspname='public' and c.relkind='r' and has_table_privilege(r.rolname, c.oid, p.priv)
+         and (r.rolname='anon' or p.priv in ('truncate','references','trigger'))`,
+    );
+    expect(rows).toEqual([]);
+  });
+  it('keeps the raw c-chart and day metrics out of the lease and the settings RPC', async () => {
+    await role('postgres');
+    await q(
+      `update public.sleep_status set lease_until=null, history_raw='{"events":[]}', day_metrics='{"awake_in_bed_s":1}' where household_id=$1`,
+      [hh],
+    );
+    const s = (await q('select public.cw_lease($1) s', [hh]))[0].s;
+    expect(s.lease_token).toBeTruthy();
+    expect(s.timezone).toBe('America/Los_Angeles');
+    expect(s).toHaveProperty('derive_enabled');
+    expect(s).toHaveProperty('history_at');
+    expect(s).not.toHaveProperty('history_raw');
+    expect(s).not.toHaveProperty('day_metrics');
+    await q("select set_config('request.jwt.claim.sub',$1,false)", [user]);
+    await role('authenticated');
+    const m = (await q('select public.monitor_settings() m'))[0].m;
+    expect(m).not.toHaveProperty('history_raw');
+    expect(m).not.toHaveProperty('lease_token');
+    expect(m.day_metrics).toEqual({ awake_in_bed_s: 1 });
+    expect(m.requests_24h).toBeGreaterThan(0);
   });
 });
 

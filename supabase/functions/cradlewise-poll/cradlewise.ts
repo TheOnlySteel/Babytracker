@@ -198,10 +198,17 @@ export function parseHistory(raw: unknown, _householdTz: string): HistoryParse {
   return { sleeps, unknownLabels: [...unknown], droppedIntervals: dropped };
 }
 
-export function reconcileSleep(history: HistorySleep[], rows: SleepRow[], ctx: Context): Action[] {
+/**
+ * `from`, when given, is the start of the window the caller loaded `rows` for. Intervals that
+ * begin earlier are not acted on: their rows may not be loaded, so they would be inserted a
+ * second time (or resurrect a dismissed sleep). They still count as overlaps, so a row that
+ * straddles the boundary is never reshaped to the in-window part only.
+ */
+export function reconcileSleep(history: HistorySleep[], rows: SleepRow[], ctx: Context, from?: string): Action[] {
   const actions: Action[] = [];
   const used = new Set<string>();
   for (const h of history) {
+    if (from && Date.parse(h.start) < Date.parse(from)) continue;
     const key = sourceKey(h.start);
     const matching = rows.filter(
       (e) => e.source_key === key || (Date.parse(e.started_at) < Date.parse(h.end) && Date.parse(e.ended_at ?? ctx.now) > Date.parse(h.start))
@@ -217,6 +224,14 @@ export function reconcileSleep(history: HistorySleep[], rows: SleepRow[], ctx: C
       const hits = history.filter((x) => Date.parse(e.started_at) < Date.parse(x.end) && Date.parse(e.ended_at ?? ctx.now) > Date.parse(x.start));
       if (hits.length > 1) continue;
       used.add(e.id);
+      // The crib still reports sleep: a completed c-chart interval here means a short wake the
+      // status polls never saw, and the sleep after it has no end yet. Ending the row would stop
+      // the running sleep (derivation cannot reopen the same key), so only its start is
+      // corrected; live derivation closes it.
+      if (!e.ended_at && (ctx.status === 'sleeping' || ctx.status === 'stirring')) {
+        if (e.started_at !== h.start) actions.push({ op: 'update', id: e.id, version: e.updated_at, started_at: h.start });
+        continue;
+      }
       if (e.started_at === h.start && e.ended_at === h.end && e.payload.provisional === false) continue;
       actions.push({ op: 'update', id: e.id, version: e.updated_at, started_at: h.start, ended_at: h.end, payload: { provisional: false, uncertain_end: false } });
     } else

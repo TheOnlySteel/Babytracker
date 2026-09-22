@@ -6,15 +6,17 @@ export default defineConfig({
   plugins: [
     sveltekit(),
     SvelteKitPWA({
-      registerType: 'autoUpdate',
+      // 'prompt', not 'autoUpdate': autoUpdate reloads the page the moment a new build activates,
+      // which discards whatever a caregiver has typed into an open sheet. See +layout.svelte.
+      registerType: 'prompt',
       strategies: 'generateSW',
       injectRegister: false,
       // SPA on adapter-static: precache the fallback page (revision from version.json) so the app shell starts offline.
       kit: { adapterFallback: 'index.html', spa: true, includeVersionFile: true },
       manifest: {
-        name: 'Rosalie',
-        short_name: 'Rosalie',
-        description: 'Feed, diaper and pump log',
+        name: 'Cradlewatch',
+        short_name: 'Cradlewatch',
+        description: 'Feed, diaper, pump and sleep log',
         start_url: '/',
         scope: '/',
         display: 'standalone',

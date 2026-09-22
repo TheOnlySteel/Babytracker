@@ -4,6 +4,8 @@
   import { pwaInfo } from 'virtual:pwa-info';
   import { configured } from '$lib/supabase';
   import { store } from '$lib/data/store.svelte';
+  import { ui } from '$lib/data/ui.svelte';
+  import { toast } from '$lib/data/toast.svelte';
   import SignIn from '$lib/components/SignIn.svelte';
   import TabBar from '$lib/ui/TabBar.svelte';
   import Toasts from '$lib/ui/Toasts.svelte';
@@ -17,20 +19,44 @@
     if (configured) store.init();
     if (pwaInfo) {
       const { registerSW } = await import('virtual:pwa-register');
-      registerSW({ immediate: true });
+      // A new build waits (registerType 'prompt') instead of reloading the page under a half-filled
+      // sheet. It is applied the next time the app goes to the background with no sheet open, or
+      // right away from the toast.
+      let waiting = false;
+      const apply = () => void updateSW(true);
+      const updateSW = registerSW({
+        immediate: true,
+        onNeedRefresh() {
+          if (waiting) return;
+          waiting = true;
+          toast('A new version of Cradlewatch is ready', { undo: apply, action: 'Reload', ttl: 0 });
+        },
+        onRegisteredSW(_url, reg) {
+          if (!reg) return;
+          // An installed PWA is resumed, not reloaded, so it would otherwise only look for a
+          // new build on a cold start. Check on every return to the foreground and hourly.
+          document.addEventListener('visibilitychange', () => {
+            if (document.visibilityState === 'visible') reg.update().catch(() => {});
+          });
+          setInterval(() => reg.update().catch(() => {}), 60 * 60_000);
+        }
+      });
+      document.addEventListener('visibilitychange', () => {
+        if (waiting && document.visibilityState === 'hidden' && !ui.sheet) apply();
+      });
     }
   });
 </script>
 
 <svelte:head>
-  <title>Rosalie</title>
+  <title>Cradlewatch</title>
   {@html webManifestLink}
 </svelte:head>
 
 {#if !configured}
   <main class="msg">
     <h1>Not configured</h1>
-    <p>Set <code>PUBLIC_SUPABASE_URL</code> and <code>PUBLIC_SUPABASE_ANON_KEY</code> in the build environment. See SETUP.md.</p>
+    <p>Set <code>PUBLIC_SUPABASE_URL</code> and <code>PUBLIC_SUPABASE_ANON_KEY</code> in the build environment. See docs/setup.md.</p>
   </main>
 {:else if !store.ready}
   <main class="msg"><p class="muted">Loading…</p></main>

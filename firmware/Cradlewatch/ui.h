@@ -1,4 +1,4 @@
-// Design tokens, text, widgets and hit areas for the NurseryPad screens.
+// Design tokens, text, widgets and hit areas for the Cradlewatch pad screens.
 // Everything here draws into `canvas`; nothing here touches the network or app state.
 //
 // The look is 16-bit console menu: a limited palette, hard square edges, a light bevel on the

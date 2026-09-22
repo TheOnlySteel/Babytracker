@@ -12,8 +12,14 @@
 import { readFileSync } from 'node:fs';
 import Papa from 'papaparse';
 import { createClient } from '@supabase/supabase-js';
-import 'dotenv/config';
 import { mapRow } from './nara-map.mjs';
+
+// Node's own .env loader (Node 20.12+); variables already set in the environment win.
+try {
+  process.loadEnvFile();
+} catch {
+  /* no .env: rely on the environment */
+}
 
 const file = process.argv[2];
 if (!file) {

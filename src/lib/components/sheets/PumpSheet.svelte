@@ -79,14 +79,18 @@
         const patch =
           action === "stop"
             ? { ...stopPatch(base!, new Date()), payload, note: note || null }
-            : {
-                started_at: startedAt.toISOString(),
-                ended_at: new Date(
-                  +startedAt + (m.value ?? 0) * 60000,
-                ).toISOString(),
-                payload,
-                note: note || null,
-              };
+            : manual
+              ? {
+                  started_at: startedAt.toISOString(),
+                  ended_at: new Date(
+                    +startedAt + (m.value ?? 0) * 60000,
+                  ).toISOString(),
+                  payload,
+                  note: note || null,
+                }
+              : // Timer sheet whose pump was stopped elsewhere: keep that stop time; the
+                // hidden 20-minute default must never become the session's length.
+                { payload, note: note || null };
         const saved = await store.update(editing.id, patch, {
           expectedUpdatedAt: base?.updated_at,
           undoLabel: action === "stop" ? "Pump stopped" : "Updated pump",
@@ -130,7 +134,7 @@
         base = conflict!;
         conflict = null;
         // Re-save the user's edits on top of the newer version (the same contract as the other sheets).
-        save(!base?.ended_at && running ? "stop" : "save");
+        save(running && !base?.ended_at ? "stop" : "save");
       }}
     />{/if}
   {#if running}<p class="clock">

@@ -108,3 +108,25 @@ test("failed writes preserve the sleep draft", async ({ page }) => {
   ).toBeVisible();
   await expect(page.getByRole("dialog")).toBeVisible();
 });
+test("keeping mine after the other phone stopped the pump keeps their stop time", async ({
+  page,
+}) => {
+  const start = new Date(Date.now() - 30 * 60000).toISOString();
+  const state = await fixture(page, [
+    entry("pump", { started_at: start, ended_at: null, payload: {} }),
+  ]);
+  await page.getByRole("button", { name: /Pumping/ }).click();
+  await page.getByLabel("Total (mL)").fill("80");
+  // The other phone stops it at 10 minutes while this sheet is open.
+  const stoppedAt = new Date(Date.parse(start) + 10 * 60000).toISOString();
+  Object.assign(state.rows[0], {
+    ended_at: stoppedAt,
+    updated_at: new Date().toISOString(),
+  });
+  await page.getByRole("button", { name: "Stop pump", exact: true }).click();
+  await page.getByRole("button", { name: "Keep mine" }).click();
+  await expect.poll(() => state.writes.length).toBe(2);
+  expect(state.writes[1].ended_at).toBeUndefined();
+  expect(state.writes[1].payload).toMatchObject({ total_ml: 80 });
+  expect(state.rows[0].ended_at).toBe(stoppedAt);
+});

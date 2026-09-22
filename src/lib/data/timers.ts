@@ -6,7 +6,7 @@ export function stopPatch(e: Entry, now: Date) {
   let payload = { ...e.payload };
   if (e.type === "breastfeed") {
     const p = e.payload as BreastfeedPayload;
-    const segments = p.segments.map((s) => (s.end ? s : { ...s, end }));
+    const segments = (p.segments ?? []).map((s) => (s.end ? s : { ...s, end }));
     const totals = runningElapsed({ ...p, segments }, new Date(end));
     payload = {
       ...p,

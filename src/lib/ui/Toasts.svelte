@@ -13,7 +13,7 @@
           onclick={async () => {
             dismiss(t.id);
             await t.undo?.();
-          }}>Undo</button
+          }}>{t.action ?? 'Undo'}</button
         >
       {/if}
       {#if t.ttl === 0}

@@ -176,11 +176,13 @@ export function sameAgainLabel(e: Entry): string {
   }
 }
 
-/** Distinct recent bottle totals, most recent first. */
+/** Distinct recent bottle totals, most recent first (by feed time, not by the order rows arrived). */
 export function recentAmounts(entries: Entry[], n = 4): number[] {
   const out: number[] = [];
-  for (const e of entries) {
-    if (e.type !== 'bottle' || e.deleted_at) continue;
+  const bottles = entries
+    .filter((e) => e.type === 'bottle' && !e.deleted_at)
+    .sort((a, b) => b.started_at.localeCompare(a.started_at));
+  for (const e of bottles) {
     const ml = bottleTotalMl(e.payload as BottlePayload);
     if (ml > 0 && !out.includes(ml)) out.push(ml);
     if (out.length >= n) break;

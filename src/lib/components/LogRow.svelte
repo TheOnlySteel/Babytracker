@@ -4,6 +4,7 @@
   import { entryLabel, entryMagnitude, iconFor } from '$lib/data/derive';
   import { fmtTime } from '$lib/data/format';
   import { dayKey } from '$lib/data/summary';
+  import { shiftDate } from '$lib/data/sleep-time';
   import { store } from '$lib/data/store.svelte';
   import Icon from '$lib/ui/Icon.svelte';
 
@@ -11,7 +12,7 @@
 
   const mag = $derived(entryMagnitude(entry));
   const pct = $derived(mag && max[mag.unit] > 0 ? Math.max(4, Math.round((mag.value / max[mag.unit]) * 100)) : 0);
-  const isYesterday = $derived(showDay && dayKey(new Date(entry.started_at)) === dayKey(new Date(store.now.getTime() - 86400_000)));
+  const isYesterday = $derived(showDay && dayKey(new Date(entry.started_at)) === shiftDate(dayKey(store.now), -1));
   const running = $derived(entry.ended_at === null && (entry.type === 'breastfeed' || entry.type === 'pump' || entry.type === 'sleep'));
   const barColor = $derived(color ?? (entry.type === 'sleep' ? 'var(--sleep)' : entry.type === 'diaper' ? 'var(--diaper)' : entry.type === 'pump' ? 'var(--pump)' : 'var(--feed)'));
 </script>
